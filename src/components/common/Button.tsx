@@ -95,9 +95,11 @@ export const Button: React.FC<ButtonProps> = ({
     },
   };
 
+  const isShiny = variant === 'gold' || variant === 'danger';
+
   return (
     <button
-      className={`interactive-tap ${className}`}
+      className={`interactive-tap ${isShiny ? 'shiny-button' : ''} ${className}`}
       disabled={disabled || isLoading}
       style={{
         ...baseStyles,

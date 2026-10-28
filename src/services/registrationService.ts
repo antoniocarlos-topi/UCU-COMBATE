@@ -11,6 +11,7 @@ import {
   calculateAgeAtEvent,
 } from '../utils/validationRules';
 import { EventInvitationData } from './eventService';
+import { registerAthleteInUnifiedStore, getUnifiedStore } from './storeSync';
 
 export interface RegistrationSubmissionData {
   event: EventInvitationData;
@@ -40,12 +41,30 @@ export interface RegistrationSubmissionResult {
 }
 
 /**
+ * Converte um arquivo File para Data URL de forma assíncrona
+ */
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Verifica se um apelido já está em uso (verificação case-insensitive)
  */
 export async function checkNicknameAvailability(nickname: string): Promise<{ available: boolean; error?: string }> {
   const normalized = normalizeNickname(nickname);
   if (normalized.length < 3) {
     return { available: false, error: 'O apelido deve ter pelo menos 3 caracteres.' };
+  }
+
+  // 1. Verificar no store unificado local
+  const store = getUnifiedStore();
+  if (store.users.some((u) => u.nicknameNormalized === normalized)) {
+    return { available: false, error: 'Este apelido de combate já está em uso na arena. Escolha outro.' };
   }
 
   const isSupabaseConfigured = Boolean(
@@ -124,92 +143,121 @@ export async function submitAthleteRegistration(
     return { success: false, error: 'A foto de rosto do lutador é obrigatória para o card oficial.' };
   }
 
-  // 7. Persistência real integrada com Supabase
+  // Converter foto para persistência imediata
+  const avatarDataUrl = await fileToDataUrl(data.avatarFile);
+
+  // 7. Gravar no Store Unificado Local (Garantindo que Login e Perfil funcionem imediatamente)
+  const localStoreRes = registerAthleteInUnifiedStore({
+    event: data.event,
+    fullName: data.fullName,
+    nickname: data.nickname,
+    password: data.password,
+    recoveryEmail: data.recoveryEmail,
+    phone: data.phone,
+    birthDate: data.birthDate,
+    declaredWeight: weightVal.parsedWeight,
+    category: {
+      id: category.id,
+      name: category.name,
+      minWeight: category.minWeight,
+      maxWeight: category.maxWeight,
+    },
+    avatarUrl: avatarDataUrl,
+    isMinor,
+    guardianName: data.guardianName,
+    guardianRelationship: data.guardianRelationship,
+    guardianPhone: data.guardianPhone,
+    guardianDoc: data.guardianDoc,
+    imageConsent: data.imageConsent,
+    termsConsent: data.termsConsent,
+  });
+
+  if (!localStoreRes.success) {
+    return { success: false, error: localStoreRes.error };
+  }
+
+  // 8. Persistência no Supabase (se configurado)
   try {
-    // Criação do usuário em auth.users via Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: data.recoveryEmail,
-      password: data.password,
-      options: {
-        data: {
+    const isSupabaseConfigured = Boolean(
+      import.meta.env.VITE_SUPABASE_URL &&
+      !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
+    );
+
+    if (isSupabaseConfigured) {
+      const { data: authData } = await supabase.auth.signUp({
+        email: data.recoveryEmail,
+        password: data.password,
+        options: {
+          data: {
+            full_name: data.fullName,
+            nickname: data.nickname,
+          },
+        },
+      });
+
+      const userId = authData?.user?.id || `usr-${Date.now()}`;
+      let avatarUrl = avatarDataUrl;
+
+      if (authData?.user?.id && data.avatarFile) {
+        const filePath = `${userId}/${data.avatarFile.name}`;
+        const { data: uploadData } = await supabase.storage
+          .from('avatars')
+          .upload(filePath, data.avatarFile, {
+            contentType: 'image/webp',
+            upsert: true,
+          });
+
+        if (uploadData?.path) {
+          const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(uploadData.path);
+          avatarUrl = publicUrlData.publicUrl;
+        }
+      }
+
+      const { data: profileRecord } = await supabase
+        .from('profiles')
+        .insert({
+          auth_user_id: userId,
           full_name: data.fullName,
           nickname: data.nickname,
-        },
-      },
-    });
+          recovery_email: data.recoveryEmail,
+          phone: data.phone,
+          birth_date: data.birthDate,
+          is_minor: isMinor,
+          guardian_name: isMinor ? data.guardianName : null,
+          guardian_relationship: isMinor ? data.guardianRelationship : null,
+          guardian_phone: isMinor ? data.guardianPhone : null,
+          guardian_document: isMinor ? data.guardianDoc : null,
+          image_consent: data.imageConsent,
+          terms_consent: data.termsConsent,
+          avatar_url: avatarUrl,
+        })
+        .select('id')
+        .maybeSingle();
 
-    if (authError) {
-      console.warn('[RegistrationService] Aviso do Supabase Auth:', authError.message);
-    }
+      const profileId = profileRecord?.id || `prof-${Date.now()}`;
 
-    const userId = authData?.user?.id || `usr-${Date.now()}`;
-
-    // Upload seguro da foto no bucket avatars/{userId}/avatar.webp
-    let avatarUrl: string | null = null;
-    if (authData?.user?.id && data.avatarFile) {
-      const filePath = `${userId}/${data.avatarFile.name}`;
-      const { data: uploadData } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, data.avatarFile, {
-          contentType: 'image/webp',
-          upsert: true,
+      await supabase
+        .from('event_registrations')
+        .insert({
+          event_id: data.event.id,
+          profile_id: profileId,
+          weight_category_id: category.id || 'cat-default',
+          declared_weight: weightVal.parsedWeight,
+          status: 'pending',
+          guardian_authorized: isMinor,
         });
-
-      if (uploadData?.path) {
-        const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(uploadData.path);
-        avatarUrl = publicUrlData.publicUrl;
-      }
     }
-
-    // Gravação na tabela profiles
-    const { data: profileRecord } = await supabase
-      .from('profiles')
-      .insert({
-        auth_user_id: userId,
-        full_name: data.fullName,
-        nickname: data.nickname,
-        recovery_email: data.recoveryEmail,
-        phone: data.phone,
-        birth_date: data.birthDate,
-        is_minor: isMinor,
-        guardian_name: isMinor ? data.guardianName : null,
-        guardian_relationship: isMinor ? data.guardianRelationship : null,
-        guardian_phone: isMinor ? data.guardianPhone : null,
-        guardian_document: isMinor ? data.guardianDoc : null,
-        image_consent: data.imageConsent,
-        terms_consent: data.termsConsent,
-        avatar_url: avatarUrl,
-      })
-      .select('id')
-      .maybeSingle();
-
-    const profileId = profileRecord?.id || `prof-${Date.now()}`;
-
-    // Gravação da inscrição na tabela event_registrations (Status: PENDENTE)
-    const { data: regRecord } = await supabase
-      .from('event_registrations')
-      .insert({
-        event_id: data.event.id,
-        profile_id: profileId,
-        weight_category_id: category.id || 'cat-default',
-        declared_weight: weightVal.parsedWeight,
-        status: 'pending',
-        guardian_authorized: isMinor,
-      })
-      .select('id')
-      .maybeSingle();
 
     return {
       success: true,
-      registrationId: regRecord?.id || `reg-${Date.now()}`,
+      registrationId: localStoreRes.registrationId,
       status: 'pending',
       whatsappUrl: data.event.whatsapp_group_url,
     };
   } catch (err: any) {
-    // Caso o Supabase local não tenha chaves válidas ativas, registra com sucesso resiliente
     return {
       success: true,
-      registrationId: `reg-demo-${Date.now()}`,
+      registrationId: localStoreRes.registrationId,
       status: 'pending',
       whatsappUrl: data.event.whatsapp_group_url,
     };

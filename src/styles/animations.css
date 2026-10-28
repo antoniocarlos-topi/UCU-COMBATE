@@ -127,6 +127,333 @@
   transform: scale(0.97);
 }
 
+/* --------------------------------------------------------------------------
+   NOVAS ANIMAÇÕES CRIATIVAS — U.C.U ARENA LUXURY COMBAT
+   -------------------------------------------------------------------------- */
+
+/* Carta Flutuante Tridimensional instigando curiosidade */
+@keyframes floatingLetter {
+  0% {
+    transform: translateY(0px) rotate(0deg);
+    filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 15px rgba(212, 175, 55, 0.2));
+  }
+  50% {
+    transform: translateY(-14px) rotate(-0.8deg);
+    filter: drop-shadow(0 28px 40px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 28px rgba(212, 175, 55, 0.45));
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg);
+    filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.7)) drop-shadow(0 0 15px rgba(212, 175, 55, 0.2));
+  }
+}
+
+.floating-letter {
+  animation: floatingLetter 4.5s ease-in-out infinite;
+  will-change: transform, filter;
+}
+
+/* Selo de Cera Dourado Pulsante */
+@keyframes waxSealPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 15px rgba(212, 175, 55, 0.4), inset 0 2px 4px rgba(255, 255, 255, 0.6);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 6px 28px rgba(212, 175, 55, 0.8), inset 0 2px 6px rgba(255, 255, 255, 0.9), 0 0 18px rgba(229, 25, 40, 0.5);
+  }
+}
+
+.wax-seal-pulse {
+  animation: waxSealPulse 2.8s ease-in-out infinite;
+}
+
+/* Brilho Metálico Dinâmico nos Botões */
+@keyframes buttonShimmer {
+  0% {
+    background-position: -250% 0;
+  }
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+.shiny-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shiny-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.25) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: buttonShimmer 3.5s infinite;
+  pointer-events: none;
+}
+
+.shiny-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(212, 175, 55, 0.4);
+}
+
+/* Intro Cinematográfica da Logo */
+@keyframes logoIntroReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.65) translateY(20px);
+    filter: blur(8px) brightness(1.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08) translateY(-4px);
+    filter: blur(0px) brightness(1.3);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px) brightness(1);
+  }
+}
+
+.animate-logo-intro {
+  animation: logoIntroReveal 1.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* --------------------------------------------------------------------------
+   ANIMAÇÃO CINEMATOGRÁFICA DE ABERTURA DO ENVELOPE
+   -------------------------------------------------------------------------- */
+
+/* Selo de cera quebrando e saindo para cima */
+@keyframes sealBreakAway {
+  0% {
+    transform: scale(1) translateY(0) rotate(0deg);
+    opacity: 1;
+    filter: brightness(1);
+  }
+  30% {
+    transform: scale(1.2) translateY(-8px) rotate(-5deg);
+    opacity: 1;
+    filter: brightness(1.6);
+  }
+  60% {
+    transform: scale(1.5) translateY(-60px) rotate(-15deg);
+    opacity: 0.7;
+    filter: brightness(2) blur(1px);
+  }
+  100% {
+    transform: scale(0.3) translateY(-140px) rotate(-40deg);
+    opacity: 0;
+    filter: brightness(3) blur(4px);
+  }
+}
+
+/* Aba superior do envelope abrindo para trás */
+@keyframes envelopeFlapOpen {
+  0% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+  40% {
+    transform: rotateX(-100deg);
+    opacity: 0.85;
+  }
+  100% {
+    transform: rotateX(-180deg);
+    opacity: 0;
+  }
+}
+
+/* Corpo do envelope deslizando para baixo e desaparecendo */
+@keyframes envelopeBodyFade {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  60% {
+    transform: translateY(30px) scale(0.95);
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(60px) scale(0.88);
+    opacity: 0;
+  }
+}
+
+/* Carta subindo de dentro do envelope */
+@keyframes letterRiseFromEnvelope {
+  0% {
+    transform: translateY(80px) scale(0.9);
+    opacity: 0;
+    filter: blur(4px);
+  }
+  40% {
+    transform: translateY(20px) scale(0.97);
+    opacity: 0.6;
+    filter: blur(1px);
+  }
+  70% {
+    transform: translateY(-5px) scale(1.01);
+    opacity: 0.95;
+    filter: blur(0px);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+.animate-seal-break {
+  animation: sealBreakAway 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+.animate-flap-open {
+  animation: envelopeFlapOpen 0.8s cubic-bezier(0.4, 0, 0.2, 1) 0.15s forwards;
+  transform-origin: top center;
+}
+
+.animate-envelope-fade {
+  animation: envelopeBodyFade 0.7s cubic-bezier(0.4, 0, 0.2, 1) 0.5s forwards;
+}
+
+.animate-letter-rise {
+  animation: letterRiseFromEnvelope 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.65s forwards;
+  opacity: 0;
+}
+
+/* --------------------------------------------------------------------------
+   ANIMAÇÃO DE BOAS-VINDAS PÓS-LOGIN
+   -------------------------------------------------------------------------- */
+
+/* Logo entrando dramaticamente com escala e brilho */
+@keyframes welcomeLogoDramatic {
+  0% {
+    transform: scale(0.3) translateY(40px);
+    opacity: 0;
+    filter: blur(12px) brightness(0.5);
+  }
+  35% {
+    transform: scale(1.15) translateY(-10px);
+    opacity: 1;
+    filter: blur(0px) brightness(1.5);
+  }
+  55% {
+    transform: scale(0.95) translateY(0px);
+    opacity: 1;
+    filter: blur(0px) brightness(1.1);
+  }
+  100% {
+    transform: scale(1) translateY(0px);
+    opacity: 1;
+    filter: blur(0px) brightness(1);
+  }
+}
+
+/* Raio de luz passando suavemente pela logo inteira sem nenhum corte ou rebarba */
+@keyframes lightRaySweep {
+  0% {
+    transform: translateX(-240%) rotate(-25deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(360%) rotate(-25deg);
+    opacity: 0;
+  }
+}
+
+/* Texto de boas-vindas subindo suavemente */
+@keyframes welcomeTextAppear {
+  0% {
+    transform: translateY(24px);
+    opacity: 0;
+    filter: blur(4px);
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+/* Overlay saindo suavemente */
+@keyframes welcomeOverlayExit {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+.animate-welcome-logo {
+  animation: welcomeLogoDramatic 1.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-light-ray {
+  animation: lightRaySweep 2.8s cubic-bezier(0.25, 1, 0.5, 1) 0.9s forwards;
+  opacity: 0;
+}
+
+.animate-welcome-text {
+  animation: welcomeTextAppear 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.5s forwards;
+  opacity: 0;
+}
+
+.animate-welcome-exit {
+  animation: welcomeOverlayExit 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* --------------------------------------------------------------------------
+   BRACKET & TORNEIO — ANIMAÇÕES
+   -------------------------------------------------------------------------- */
+
+@keyframes bracketMatchHighlight {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0);
+  }
+  50% {
+    box-shadow: 0 0 18px 4px rgba(212, 175, 55, 0.35);
+  }
+}
+
+@keyframes bracketConnectorDraw {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.bracket-match-live {
+  animation: bracketMatchHighlight 2.5s ease-in-out infinite;
+}
+
+.bracket-connector-line {
+  stroke-dasharray: 100;
+  animation: bracketConnectorDraw 0.8s ease-out forwards;
+}
+
+
 /* --- SUPORTE OBRIGATÓRIO A REDUCED MOTION --- */
 @media (prefers-reduced-motion: reduce) {
   *,

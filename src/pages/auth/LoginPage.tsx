@@ -35,6 +35,8 @@ export const LoginPage: React.FC = () => {
     if (result.error) {
       showToast(result.error, 'error');
     } else {
+      // Ativa a animação cinematográfica de boas-vindas pós-login
+      sessionStorage.setItem('ucu_login_welcome', 'true');
       showToast('Acesso concedido com sucesso!', 'success');
       navigate(from, { replace: true });
     }

@@ -18,6 +18,8 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   height: 100%;
+  touch-action: manipulation;
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -31,6 +33,7 @@ body {
   line-height: var(--line-height-normal);
   overflow-x: hidden;
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  -webkit-overflow-scrolling: touch;
 }
 
 #root {

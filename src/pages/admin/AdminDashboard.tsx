@@ -19,6 +19,7 @@ import { AdminCreateEventModal } from '../../components/admin/AdminCreateEventMo
 import { AdminEventSettingsModal } from '../../components/admin/AdminEventSettingsModal';
 import { AdminBracketView } from '../../components/admin/AdminBracketView';
 import { AdminLiveControl } from '../../components/admin/AdminLiveControl';
+import { AdminTournamentModal } from '../../components/admin/AdminTournamentModal';
 import {
   generateEventBrackets,
   BracketResult,
@@ -34,6 +35,7 @@ import {
   ShieldCheck,
   GitBranch,
   Radio,
+  Trophy,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -57,9 +59,10 @@ export const AdminDashboard: React.FC = () => {
   // Dados de Chaveamento (Fase 06)
   const [brackets, setBrackets] = useState<BracketResult[]>([]);
 
-  // Modais de Evento
+  // Modais de Evento & Torneio
   const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
   const [isEditEventOpen, setIsEditEventOpen] = useState(false);
+  const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
 
   const loadData = async (slug: string) => {
     setIsLoading(true);
@@ -261,12 +264,21 @@ export const AdminDashboard: React.FC = () => {
         />
       )}
 
-      {/* ABA: CHAVEAMENTO MATA-MATA (FASE 06) */}
+      {/* ABA: CHAVEAMENTO MATA-MATA E CAMPEONATOS COMPLETOS */}
       {activeTab === 'chaveamento' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <Button
               variant="gold"
+              size="sm"
+              leftIcon={<Trophy size={14} />}
+              onClick={() => setIsTournamentModalOpen(true)}
+            >
+              Criar Campeonato & Chaveamento Completo
+            </Button>
+
+            <Button
+              variant="secondary"
               size="sm"
               leftIcon={<GitBranch size={14} />}
               onClick={() => {
@@ -285,10 +297,14 @@ export const AdminDashboard: React.FC = () => {
               }}
               disabled={registrations.filter((r) => r.status === 'approved').length < 2}
             >
-              Gerar Chaveamento Automático
+              Gerar Chaveamento Rápido
             </Button>
           </div>
-          <AdminBracketView brackets={brackets} />
+          <AdminBracketView
+            brackets={brackets}
+            onUpdateBrackets={setBrackets}
+            onOpenTournamentModal={() => setIsTournamentModalOpen(true)}
+          />
         </div>
       )}
 
@@ -355,6 +371,30 @@ export const AdminDashboard: React.FC = () => {
               setSelectedEventSlug('arena-inaugural');
               loadData('arena-inaugural');
             }
+          }}
+        />
+      )}
+
+      {/* Modal: Criar Campeonato & Chaveamento Completo */}
+      {isTournamentModalOpen && activeEvent && (
+        <AdminTournamentModal
+          isOpen={isTournamentModalOpen}
+          onClose={() => setIsTournamentModalOpen(false)}
+          eventId={activeEvent.id}
+          registrations={registrations}
+          categories={DEFAULT_WEIGHT_CATEGORIES.map((c) => ({
+            id: `cat-${c.name.toLowerCase().replace(/\s+/g, '-').replace(/[()]/g, '')}`,
+            name: c.name,
+          }))}
+          onTournamentCreated={(newBracket) => {
+            setBrackets((prev) => [
+              newBracket,
+              ...prev.filter((b) => b.categoryId !== newBracket.categoryId),
+            ]);
+            showToast(
+              `Campeonato "${newBracket.tournamentTitle || newBracket.categoryName}" criado com sucesso!`,
+              'success'
+            );
           }}
         />
       )}

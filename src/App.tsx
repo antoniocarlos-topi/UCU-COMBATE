@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AppLayout } from './components/layout/AppLayout';
@@ -7,6 +7,7 @@ import { ProtectedRoute } from './components/common/ProtectedRoute';
 import { AdminRoute } from './components/common/AdminRoute';
 
 // Páginas
+import { ArenaPublicHome } from './pages/public/ArenaPublicHome';
 import { EventLanding } from './pages/public/EventLanding';
 import { RegistrationPage } from './pages/public/RegistrationPage';
 import { LoginPage } from './pages/auth/LoginPage';
@@ -17,21 +18,27 @@ import { NotFoundPage } from './pages/feedback/NotFoundPage';
 
 export const App: React.FC = () => {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AuthProvider>
         <ToastProvider>
           <Routes>
             <Route path="/" element={<AppLayout />}>
-              {/* Rotas Públicas */}
-              <Route index element={<EventLanding />} />
+              {/* Página Principal Oficial — Arena U.C.U (Lutas, Categorias, Vídeos) */}
+              <Route index element={<ArenaPublicHome />} />
+
+              {/* Índices Separados de Acesso Restrito/Direto via URL */}
+              <Route path="convite" element={<EventLanding />} />
               <Route path="convite/:eventSlug" element={<EventLanding />} />
               <Route path="convite/:eventSlug/inscrever" element={<RegistrationPage />} />
+              <Route path="inscrever" element={<RegistrationPage />} />
               <Route path="e/:slug" element={<EventLanding />} />
               <Route path="e/:slug/inscrever" element={<RegistrationPage />} />
+
+              {/* Autenticação */}
               <Route path="login" element={<LoginPage />} />
               <Route path="demo-components" element={<DesignSystemDemo />} />
 
-              {/* Rota Protegida do Atleta */}
+              {/* Rota Protegida do Atleta (Meu Card) */}
               <Route
                 path="atleta"
                 element={
@@ -41,7 +48,7 @@ export const App: React.FC = () => {
                 }
               />
 
-              {/* Rota Protegida de Administração */}
+              {/* Rota Protegida de Administração (Acesso direto por URL) */}
               <Route
                 path="admin"
                 element={
@@ -58,6 +65,6 @@ export const App: React.FC = () => {
           </Routes>
         </ToastProvider>
       </AuthProvider>
-    </BrowserRouter>
+    </HashRouter>
   );
 };

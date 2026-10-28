@@ -44,7 +44,25 @@ Se realmente deseja participar, clique no botão ‘Quero lutar’. Caso não qu
   ],
   location_name: 'Espaço M-thor',
   event_date_text: 'A combinar',
-  whatsapp_group_url: 'https://chat.whatsapp.com/UCUArenaOficialExemplo',
+  whatsapp_group_url: 'https://chat.whatsapp.com/JTz3GBUwKYXK1n8bjbpmwr',
+  requires_invite: false,
+  min_weight: 50.0,
+  max_weight: 90.0,
+  status: 'open_for_registration',
+  categories: DEFAULT_WEIGHT_CATEGORIES,
+};
+
+// Evento Secundário para teste de múltiplos eventos
+export const SECOND_TEST_EVENT: EventInvitationData = {
+  id: 'e200-desafio-inverno',
+  slug: 'arena-desafio-inverno',
+  title: 'U.C.U Arena — Desafio de Inverno',
+  headline: 'Segunda Edição Oficial',
+  invitation_text: 'O segundo grande evento do circuito de boxe U.C.U.',
+  signatories: ['Antônio Carlos', 'Jardel Franklin'],
+  location_name: 'Ginásio Central U.C.U',
+  event_date_text: '20 de Dezembro de 2026',
+  whatsapp_group_url: 'https://chat.whatsapp.com/UCUDesafioInverno',
   requires_invite: false,
   min_weight: 50.0,
   max_weight: 90.0,
@@ -56,6 +74,10 @@ Se realmente deseja participar, clique no botão ‘Quero lutar’. Caso não qu
  * Busca os dados completos do convite de um evento por slug
  */
 export async function getEventInvitationBySlug(slug: string): Promise<EventInvitationData> {
+  if (slug === SECOND_TEST_EVENT.slug) {
+    return SECOND_TEST_EVENT;
+  }
+
   const isSupabaseConfigured = Boolean(
     import.meta.env.VITE_SUPABASE_URL &&
     !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')

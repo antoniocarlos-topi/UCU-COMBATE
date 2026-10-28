@@ -9,9 +9,11 @@ import {
   EventRegistration,
   MatchFight,
   UserProfile,
-  WeightCategory,
 } from '../types/app.types';
-import { DEFAULT_INAUGURAL_EVENT, EventInvitationData } from './eventService';
+import { DEFAULT_INAUGURAL_EVENT, EventInvitationData, SECOND_TEST_EVENT } from './eventService';
+import { getUnifiedStore } from './storeSync';
+
+export { SECOND_TEST_EVENT };
 
 export interface AthleteCareerStats {
   totalFights: number;
@@ -48,23 +50,7 @@ export interface AthleteEventDashboardData {
   careerStats: AthleteCareerStats;
 }
 
-// Evento Secundário para teste de múltiplos eventos
-export const SECOND_TEST_EVENT: EventInvitationData = {
-  id: 'e200-desafio-inverno',
-  slug: 'arena-desafio-inverno',
-  title: 'U.C.U Arena — Desafio de Inverno',
-  headline: 'Segunda Edição Oficial',
-  invitation_text: 'O segundo grande evento do circuito de boxe U.C.U.',
-  signatories: ['Antônio Carlos', 'Jardel Franklin'],
-  location_name: 'Ginásio Central U.C.U',
-  event_date_text: '20 de Dezembro de 2026',
-  whatsapp_group_url: 'https://chat.whatsapp.com/UCUDesafioInverno',
-  requires_invite: false,
-  min_weight: 50.0,
-  max_weight: 90.0,
-  status: 'open_for_registration',
-  categories: DEFAULT_INAUGURAL_EVENT.categories,
-};
+
 
 /**
  * Calcula estatísticas esportivas a partir de uma lista de confrontos finalizados
@@ -217,185 +203,96 @@ export async function getAthleteDashboardData(
     }
   }
 
-  // DADOS ESTRUTURAIS DE DEMONSTRAÇÃO E TESTE DA FASE 04
-  const demoProfileId = 'prof-demo-123';
-  const demoProfile: UserProfile = {
-    id: demoProfileId,
-    auth_user_id: authUserId || 'auth-demo-user',
-    full_name: 'Carlos Demolidor Silva',
-    nickname: 'Demolidor',
-    recovery_email: 'privado@atleta.com',
-    phone: '(11) 99888-7777',
-    birthDate: '2000-03-15',
+  // SINCRONIZAÇÃO DINÂMICA COM O STORE UNIFICADO (MODO LOCAL / DEMO RESILIENTE)
+  const store = getUnifiedStore();
+
+  // 1. Identificar usuário logado ou associado
+  const user = store.users.find(
+    (u) => u.id === authUserId || u.profileId === authUserId || u.nickname === authUserId
+  );
+
+  // 2. Identificar a inscrição do atleta no store
+  let currentRegistration = store.registrations.find(
+    (r) =>
+      (user && (r.profile_id === user.profileId || r.profile?.auth_user_id === user.id)) ||
+      r.profile?.auth_user_id === authUserId ||
+      r.profile?.id === authUserId
+  );
+
+  // Fallback para primeira inscrição cadastrada caso seja admin ou visitante navegando
+  if (!currentRegistration && store.registrations.length > 0) {
+    currentRegistration = store.registrations[0];
+  }
+
+  const athleteProfile: UserProfile = currentRegistration?.profile || {
+    id: user?.profileId || 'prof-demo',
+    auth_user_id: user?.id || authUserId,
+    full_name: user?.fullName || 'Atleta da Arena',
+    nickname: user?.nickname || 'Guerreiro UCU',
+    recovery_email: user?.recoveryEmail || '',
+    phone: '',
+    birth_date: '2000-01-01',
     is_minor: false,
     image_consent: true,
     terms_consent: true,
     avatar_url: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  } as any;
-
-  const demoCategory: WeightCategory = {
-    id: 'cat-meio-medio',
-    event_id: DEFAULT_INAUGURAL_EVENT.id,
-    name: 'Peso Meio-Médio (Mais de 60 até 70 kg)',
-    min_weight: 60.01,
-    max_weight: 70.0,
-    display_order: 2,
   };
-
-  const demoRegistration: EventRegistration = {
-    id: 'reg-demo-01',
-    event_id: DEFAULT_INAUGURAL_EVENT.id,
-    profile_id: demoProfileId,
-    weight_category_id: demoCategory.id,
-    declared_weight: 67.5,
-    verified_weight: 67.2, // Confirmado na pesagem oficial
-    status: 'approved',
-    guardian_authorized: false,
-    checkin_status: true,
-    registered_at: new Date().toISOString(),
-    profile: demoProfile,
-    weight_category: demoCategory,
-  };
-
-  const opponentProfile: UserProfile = {
-    id: 'prof-opp-456',
-    auth_user_id: 'auth-opp',
-    full_name: 'Roberto Falcão Lima',
-    nickname: 'Falcão da Noite',
-    recovery_email: 'privado@falcao.com',
-    phone: '(11) 91111-2222',
-    birth_date: '1999-07-20',
-    is_minor: false,
-    image_consent: true,
-    terms_consent: true,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
-
-  const opponentRegistration: EventRegistration = {
-    id: 'reg-opp-02',
-    event_id: DEFAULT_INAUGURAL_EVENT.id,
-    profile_id: opponentProfile.id,
-    weight_category_id: demoCategory.id,
-    declared_weight: 68.0,
-    verified_weight: 67.8,
-    status: 'approved',
-    guardian_authorized: false,
-    checkin_status: true,
-    registered_at: new Date().toISOString(),
-    profile: opponentProfile,
-    weight_category: demoCategory,
-  };
-
-  const matches: MatchFight[] = [
-    {
-      id: 'match-01',
-      event_id: DEFAULT_INAUGURAL_EVENT.id,
-      weight_category_id: demoCategory.id,
-      match_order: 3,
-      round_name: 'Card Principal — Disputa de Cinturão',
-      fighter1_registration_id: demoRegistration.id,
-      fighter2_registration_id: opponentRegistration.id,
-      status: 'scheduled',
-      scheduled_time: '19:30',
-      fighter1: demoRegistration,
-      fighter2: opponentRegistration,
-    },
-    {
-      id: 'match-00-past',
-      event_id: DEFAULT_INAUGURAL_EVENT.id,
-      weight_category_id: demoCategory.id,
-      match_order: 1,
-      round_name: 'Luta Preliminar Amistosa',
-      fighter1_registration_id: demoRegistration.id,
-      fighter2_registration_id: opponentRegistration.id,
-      status: 'completed',
-      winner_registration_id: demoRegistration.id,
-      victory_method: 'KO',
-      score_details: 'Nocaute técnico no 2º round aos 2:15',
-      video_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      completed_at: '2026-10-15T20:45:00Z',
-      fighter1: demoRegistration,
-      fighter2: opponentRegistration,
-    },
-  ];
-
-  const stats = calculateCareerStats(demoProfileId, matches);
-
-  const enrolledEvents: ArenaEvent[] = [
-    {
-      id: DEFAULT_INAUGURAL_EVENT.id,
-      slug: DEFAULT_INAUGURAL_EVENT.slug,
-      title: DEFAULT_INAUGURAL_EVENT.title,
-      description: DEFAULT_INAUGURAL_EVENT.invitation_text,
-      event_date: '2026-11-15T18:00:00Z',
-      location_name: DEFAULT_INAUGURAL_EVENT.location_name,
-      location_address: 'Av. dos Campeões, 1000 - São Paulo, SP',
-      whatsapp_group_url: DEFAULT_INAUGURAL_EVENT.whatsapp_group_url,
-      rules_markdown: 'Regulamento oficial da U.C.U Arena.',
-      min_weight: 50.0,
-      max_weight: 90.0,
-      status: 'open_for_registration',
-      format_type: 'mixed',
-      created_at: new Date().toISOString(),
-    },
-    {
-      id: SECOND_TEST_EVENT.id,
-      slug: SECOND_TEST_EVENT.slug,
-      title: SECOND_TEST_EVENT.title,
-      description: SECOND_TEST_EVENT.invitation_text,
-      event_date: '2026-12-20T19:00:00Z',
-      location_name: SECOND_TEST_EVENT.location_name,
-      location_address: 'Rua do Combate, 500 - São Paulo, SP',
-      whatsapp_group_url: SECOND_TEST_EVENT.whatsapp_group_url,
-      rules_markdown: 'Regulamento oficial do Desafio de Inverno.',
-      min_weight: 50.0,
-      max_weight: 90.0,
-      status: 'open_for_registration',
-      format_type: 'friendly',
-      created_at: new Date().toISOString(),
-    },
-  ];
 
   const selectedEventData =
     eventSlug === SECOND_TEST_EVENT.slug ? SECOND_TEST_EVENT : DEFAULT_INAUGURAL_EVENT;
 
+  const eventMatches = store.matches.filter(
+    (m) => m.event_id === selectedEventData.id
+  );
+
+  const nextMatch =
+    eventMatches.find(
+      (m) =>
+        m.status === 'scheduled' &&
+        (m.fighter1_registration_id === currentRegistration?.id ||
+          m.fighter2_registration_id === currentRegistration?.id)
+    ) || (eventMatches.length > 0 ? eventMatches[0] : null);
+
+  const stats = calculateCareerStats(athleteProfile.id, store.matches);
+
+  const announcements = store.announcements.map((a) => ({
+    id: a.id,
+    title: a.title,
+    content: a.content,
+    createdAt: a.created_at,
+    isPinned: a.is_pinned,
+  }));
+
+  const mediaItems = store.mediaItems.map((m) => ({
+    id: m.id,
+    title: m.title,
+    mediaType: m.media_type as any,
+    url: m.url,
+  }));
+
   return {
-    athleteProfile: demoProfile,
-    currentRegistration: demoRegistration,
-    enrolledEvents,
+    athleteProfile,
+    currentRegistration: currentRegistration || {
+      id: 'reg-fallback',
+      event_id: selectedEventData.id,
+      profile_id: athleteProfile.id,
+      weight_category_id: 'cat-meio-medio',
+      declared_weight: 68.0,
+      verified_weight: null,
+      status: 'approved',
+      guardian_authorized: false,
+      checkin_status: true,
+      registered_at: new Date().toISOString(),
+      profile: athleteProfile,
+    },
+    enrolledEvents: store.events,
     selectedEvent: selectedEventData,
-    nextMatch: eventSlug === SECOND_TEST_EVENT.slug ? null : matches[0],
-    eventMatches: eventSlug === SECOND_TEST_EVENT.slug ? [] : matches,
-    announcements: [
-      {
-        id: 'ann-1',
-        title: 'Pesagem Oficial Confirmada',
-        content:
-          'A pesagem oficial presencial terá início 2 horas antes da abertura dos portões no Espaço M-thor. Traga documento oficial com foto.',
-        createdAt: '2026-10-25T10:00:00Z',
-        isPinned: true,
-      },
-      {
-        id: 'ann-2',
-        title: 'Orientações de Bandagens e Luvas',
-        content:
-          'A organização fornecerá luvas oficiais lacradas no vestiário. Bandagens devem ser inspecionadas pela arbitragem antes do aquecimento.',
-        createdAt: '2026-10-20T14:30:00Z',
-        isPinned: false,
-      },
-    ],
-    mediaItems: [
-      {
-        id: 'med-1',
-        title: 'Melhores Momentos: Nocaute de Demolidor',
-        mediaType: 'video',
-        url: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
-        thumbnailUrl: 'https://images.unsplash.com/photo-1549719386-74dfcbf7dbed?w=600&auto=format&fit=crop',
-      },
-    ],
+    nextMatch,
+    eventMatches,
+    announcements,
+    mediaItems,
     careerStats: stats,
   };
 }

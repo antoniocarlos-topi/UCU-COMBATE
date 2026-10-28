@@ -25,6 +25,36 @@ export interface BracketMatch {
   slot2: BracketSlot | null;
   winnerId: string | null;
   status: 'pending' | 'ready' | 'in_progress' | 'completed';
+  bracketType?: 'winners' | 'losers' | 'bronze' | 'round_robin';
+  method?: string | null;
+  score1?: number;
+  score2?: number;
+  notes?: string;
+}
+
+export interface RoundRobinStanding {
+  registrationId: string;
+  nickname: string;
+  matchesPlayed: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  points: number;
+  finishBonus: number;
+}
+
+export interface TournamentConfig {
+  title: string;
+  format: 'single_elimination' | 'double_elimination' | 'round_robin' | 'superfight';
+  bracketSize?: number | 'auto';
+  seedingMethod: 'weight_snake' | 'ranking' | 'random' | 'manual';
+  hasBronzeMatch: boolean;
+  roundDurationMinutes: number;
+  roundsCount: number;
+  trophyName?: string;
+  categoryId: string;
+  categoryName: string;
+  selectedAthleteIds?: string[];
 }
 
 export interface BracketResult {
@@ -35,6 +65,13 @@ export interface BracketResult {
   matches: BracketMatch[];
   byes: number;
   generatedMatches: Omit<MatchFight, 'id'>[];
+  tournamentTitle?: string;
+  format?: 'single_elimination' | 'double_elimination' | 'round_robin' | 'superfight';
+  trophyName?: string;
+  hasBronzeMatch?: boolean;
+  roundDurationMinutes?: number;
+  roundsCount?: number;
+  standings?: RoundRobinStanding[];
 }
 
 export interface BracketGenerationError {
@@ -155,18 +192,19 @@ export function generateSingleEliminationBracket(
   athletes: EventRegistration[],
   categoryId: string,
   categoryName: string,
-  eventId: string
+  eventId: string,
+  skipSeeding: boolean = false
 ): BracketResult {
   const count = athletes.length;
   const bracketSize = nextPowerOfTwo(count);
   const rounds = totalRoundsForBracket(count);
   const byes = bracketSize - count;
 
-  // Seed dos atletas por peso
-  const seeded = seedAthletesByWeight(athletes);
-
-  // Gera posições de bracket
-  const seedPositions = generateSeededPositions(bracketSize);
+  // Se skipSeeding for true (manual), usa os atletas na ordem exata informada pelo admin
+  const orderedAthletes = skipSeeding ? [...athletes] : seedAthletesByWeight(athletes);
+  const seedPositions = skipSeeding
+    ? Array.from({ length: bracketSize }, (_, i) => i)
+    : generateSeededPositions(bracketSize);
 
   // Monta os slots da primeira rodada
   const slots: (BracketSlot | null)[] = Array(bracketSize).fill(null);
@@ -174,7 +212,7 @@ export function generateSingleEliminationBracket(
   for (let i = 0; i < bracketSize; i++) {
     const seedIndex = seedPositions[i];
     if (seedIndex < count) {
-      const athlete = seeded[seedIndex];
+      const athlete = orderedAthletes[seedIndex];
       slots[i] = {
         position: i,
         registrationId: athlete.id,
@@ -476,3 +514,381 @@ export function calculateBracketStats(matches: BracketMatch[]): BracketStats {
     champion,
   };
 }
+
+// ==============================================================================
+// GERAÇÃO DE CAMPEONATOS & TORNEIOS AVANÇADOS
+// Suporte a Eliminatória Simples, Dupla Eliminação, Round Robin e Superfight
+// ==============================================================================
+
+/**
+ * Ordena/semeia atletas de acordo com o método escolhido
+ */
+export function seedAthletes(
+  athletes: EventRegistration[],
+  method: 'weight_snake' | 'ranking' | 'random' | 'manual'
+): EventRegistration[] {
+  const list = [...athletes];
+
+  switch (method) {
+    case 'weight_snake':
+      return seedAthletesByWeight(list);
+
+    case 'ranking':
+      // Ordena por peso verificado ou declarado
+      return list.sort((a, b) => {
+        const wA = a.verified_weight || a.declared_weight || 0;
+        const wB = b.verified_weight || b.declared_weight || 0;
+        return wB - wA;
+      });
+
+    case 'random':
+      // Embaralhamento determinístico / aleatório
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+      return list;
+
+    case 'manual':
+    default:
+      return list;
+  }
+}
+
+/**
+ * Gera um torneio completo a partir da configuração do usuário
+ */
+export function generateAdvancedTournament(
+  config: TournamentConfig,
+  allRegistrations: EventRegistration[],
+  eventId: string
+): BracketResult {
+  // 1. Filtrar atletas participantes
+  let athletes = allRegistrations.filter((r) => r.status === 'approved');
+  if (config.categoryId && config.categoryId !== 'openweight') {
+    athletes = athletes.filter((r) => r.weight_category_id === config.categoryId);
+  }
+  if (config.selectedAthleteIds && config.selectedAthleteIds.length > 0) {
+    athletes = athletes.filter((r) => config.selectedAthleteIds?.includes(r.id));
+  }
+
+  // Se limite de tamanho foi configurado
+  if (typeof config.bracketSize === 'number' && athletes.length > config.bracketSize) {
+    athletes = athletes.slice(0, config.bracketSize);
+  }
+
+  // 2. Aplicar Seeding
+  const seededAthletes = seedAthletes(athletes, config.seedingMethod);
+
+  // 3. Gerar de acordo com o formato escolhido
+  if (config.format === 'round_robin') {
+    return generateRoundRobinTournament(seededAthletes, config, eventId);
+  }
+
+  if (config.format === 'superfight') {
+    return generateSuperfightTournament(seededAthletes, config, eventId);
+  }
+
+  if (config.format === 'double_elimination') {
+    return generateDoubleEliminationTournament(seededAthletes, config, eventId);
+  }
+
+  // Padrão: Eliminatória Simples (com disputa de 3º opcional)
+  const isManual = config.seedingMethod === 'manual';
+  const baseBracket = generateSingleEliminationBracket(
+    seededAthletes,
+    config.categoryId,
+    config.categoryName,
+    eventId,
+    isManual
+  );
+
+  baseBracket.tournamentTitle = config.title;
+  baseBracket.format = config.format;
+  baseBracket.trophyName = config.trophyName;
+  baseBracket.hasBronzeMatch = config.hasBronzeMatch;
+  baseBracket.roundDurationMinutes = config.roundDurationMinutes;
+  baseBracket.roundsCount = config.roundsCount;
+
+  // Adiciona Disputa de Bronze se solicitada e houver ao menos 4 atletas
+  if (config.hasBronzeMatch && seededAthletes.length >= 4) {
+    baseBracket.matches.push({
+      id: `bracket-bronze-${config.categoryId}`,
+      round: baseBracket.totalRounds - 1,
+      roundName: 'Disputa de 3º Lugar (Bronze)',
+      position: 99,
+      slot1: null,
+      slot2: null,
+      winnerId: null,
+      status: 'pending',
+      bracketType: 'bronze',
+    });
+  }
+
+  return baseBracket;
+}
+
+/**
+ * Gera Torneio Round Robin (Todos contra Todos)
+ */
+function generateRoundRobinTournament(
+  athletes: EventRegistration[],
+  config: TournamentConfig,
+  eventId: string
+): BracketResult {
+  const matches: BracketMatch[] = [];
+  const generatedFights: Omit<MatchFight, 'id'>[] = [];
+  let fightCounter = 0;
+
+  // Gera todas as combinações i vs j
+  for (let i = 0; i < athletes.length; i++) {
+    for (let j = i + 1; j < athletes.length; j++) {
+      fightCounter++;
+      const a1 = athletes[i];
+      const a2 = athletes[j];
+
+      const match: BracketMatch = {
+        id: `rr-m${fightCounter}-${config.categoryId}`,
+        round: Math.floor(fightCounter / 2),
+        roundName: `Rodada ${Math.floor(fightCounter / 2) + 1}`,
+        position: fightCounter,
+        slot1: {
+          position: 0,
+          registrationId: a1.id,
+          nickname: a1.profile?.nickname || `Atleta ${i + 1}`,
+          seed: i + 1,
+        },
+        slot2: {
+          position: 1,
+          registrationId: a2.id,
+          nickname: a2.profile?.nickname || `Atleta ${j + 1}`,
+          seed: j + 1,
+        },
+        winnerId: null,
+        status: 'ready',
+        bracketType: 'round_robin',
+      };
+
+      matches.push(match);
+
+      generatedFights.push({
+        event_id: eventId,
+        weight_category_id: config.categoryId,
+        match_order: fightCounter,
+        round_name: match.roundName,
+        fighter1_registration_id: a1.id,
+        fighter2_registration_id: a2.id,
+        status: 'scheduled',
+        scheduled_time: null,
+      });
+    }
+  }
+
+  // Tabela inicial de classificação
+  const standings: RoundRobinStanding[] = athletes.map((a) => ({
+    registrationId: a.id,
+    nickname: a.profile?.nickname || 'Atleta',
+    matchesPlayed: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+    points: 0,
+    finishBonus: 0,
+  }));
+
+  return {
+    categoryId: config.categoryId,
+    categoryName: config.categoryName,
+    totalRounds: Math.ceil(matches.length / 2) || 1,
+    totalMatches: matches.length,
+    matches,
+    byes: 0,
+    generatedMatches: generatedFights,
+    tournamentTitle: config.title,
+    format: 'round_robin',
+    trophyName: config.trophyName,
+    roundDurationMinutes: config.roundDurationMinutes,
+    roundsCount: config.roundsCount,
+    standings,
+  };
+}
+
+/**
+ * Gera Torneio Super Fight / Desafio Único
+ */
+function generateSuperfightTournament(
+  athletes: EventRegistration[],
+  config: TournamentConfig,
+  eventId: string
+): BracketResult {
+  const a1 = athletes[0];
+  const a2 = athletes[1];
+
+  const match: BracketMatch = {
+    id: `superfight-1-${config.categoryId}`,
+    round: 0,
+    roundName: 'SUPER LUTA OFICIAL — DISPUTA DE TÍTULO',
+    position: 0,
+    slot1: a1 ? {
+      position: 0,
+      registrationId: a1.id,
+      nickname: a1.profile?.nickname || 'Desafiante 1',
+      seed: 1,
+    } : null,
+    slot2: a2 ? {
+      position: 1,
+      registrationId: a2.id,
+      nickname: a2.profile?.nickname || 'Desafiante 2',
+      seed: 2,
+    } : null,
+    winnerId: null,
+    status: (a1 && a2) ? 'ready' : 'pending',
+    bracketType: 'winners',
+  };
+
+  const generatedFights: Omit<MatchFight, 'id'>[] = [];
+  if (a1 && a2) {
+    generatedFights.push({
+      event_id: eventId,
+      weight_category_id: config.categoryId,
+      match_order: 1,
+      round_name: 'Super Luta',
+      fighter1_registration_id: a1.id,
+      fighter2_registration_id: a2.id,
+      status: 'scheduled',
+      scheduled_time: null,
+    });
+  }
+
+  return {
+    categoryId: config.categoryId,
+    categoryName: config.categoryName,
+    totalRounds: 1,
+    totalMatches: 1,
+    matches: [match],
+    byes: 0,
+    generatedMatches: generatedFights,
+    tournamentTitle: config.title,
+    format: 'superfight',
+    trophyName: config.trophyName,
+    roundDurationMinutes: config.roundDurationMinutes,
+    roundsCount: config.roundsCount,
+  };
+}
+
+/**
+ * Gera Torneio de Dupla Eliminação (Winners Bracket + Losers Bracket + Grande Final)
+ */
+function generateDoubleEliminationTournament(
+  athletes: EventRegistration[],
+  config: TournamentConfig,
+  eventId: string
+): BracketResult {
+  // Base dos vencedores
+  const isManual = config.seedingMethod === 'manual';
+  const winnersBracket = generateSingleEliminationBracket(
+    athletes,
+    config.categoryId,
+    config.categoryName,
+    eventId,
+    isManual
+  );
+
+  // Marcar as lutas como chave de vencedores
+  const allMatches: BracketMatch[] = winnersBracket.matches.map((m) => ({
+    ...m,
+    bracketType: 'winners',
+  }));
+
+  // Adiciona rodadas da Chave de Repescagem / Perdedores
+  const losersRounds = Math.max(1, winnersBracket.totalRounds);
+  let losersCounter = 0;
+
+  for (let r = 0; r < losersRounds; r++) {
+    const matchesInRound = Math.max(1, Math.floor(winnersBracket.matches.length / Math.pow(2, r + 2)));
+    for (let p = 0; p < matchesInRound; p++) {
+      losersCounter++;
+      allMatches.push({
+        id: `losers-r${r}-m${losersCounter}-${config.categoryId}`,
+        round: r,
+        roundName: `Repescagem — Fase ${r + 1}`,
+        position: p,
+        slot1: null,
+        slot2: null,
+        winnerId: null,
+        status: 'pending',
+        bracketType: 'losers',
+      });
+    }
+  }
+
+  // Grande Final da Dupla Eliminação (Campeão dos Vencedores vs Campeão da Repescagem)
+  allMatches.push({
+    id: `grand-final-${config.categoryId}`,
+    round: winnersBracket.totalRounds,
+    roundName: 'GRANDE FINAL UNIFICADA',
+    position: 0,
+    slot1: null,
+    slot2: null,
+    winnerId: null,
+    status: 'pending',
+    bracketType: 'winners',
+  });
+
+  return {
+    categoryId: config.categoryId,
+    categoryName: config.categoryName,
+    totalRounds: winnersBracket.totalRounds + 1,
+    totalMatches: allMatches.length,
+    matches: allMatches,
+    byes: winnersBracket.byes,
+    generatedMatches: winnersBracket.generatedMatches,
+    tournamentTitle: config.title,
+    format: 'double_elimination',
+    trophyName: config.trophyName,
+    roundDurationMinutes: config.roundDurationMinutes,
+    roundsCount: config.roundsCount,
+  };
+}
+
+/**
+ * Resolve uma luta diretamente dentro do bracket:
+ * Atribui vencedor, método da vitória, placar e propaga o vencedor para a próxima fase.
+ */
+export function resolveBracketMatch(
+  matches: BracketMatch[],
+  matchId: string,
+  winnerId: string,
+  method?: string,
+  score1?: number,
+  score2?: number
+): { updatedMatches: BracketMatch[]; champion: BracketSlot | null } {
+  const updated = matches.map((m) => {
+    if (m.id !== matchId) return m;
+
+    return {
+      ...m,
+      winnerId,
+      status: 'completed' as const,
+      method: method || 'Vitória Oficial',
+      score1: score1 ?? 0,
+      score2: score2 ?? 0,
+    };
+  });
+
+  const targetMatch = updated.find((m) => m.id === matchId);
+  const winnerNickname =
+    targetMatch?.slot1?.registrationId === winnerId
+      ? targetMatch?.slot1?.nickname
+      : targetMatch?.slot2?.nickname || 'Vencedor';
+
+  // Avança na árvore eliminatória
+  const propagated = advanceWinnerInBracket(updated, matchId, winnerId, winnerNickname);
+  const stats = calculateBracketStats(propagated);
+
+  return {
+    updatedMatches: propagated,
+    champion: stats.champion,
+  };
+}
+

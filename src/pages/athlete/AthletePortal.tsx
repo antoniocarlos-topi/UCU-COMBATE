@@ -5,15 +5,16 @@ import {
   getAthleteDashboardData,
   AthleteEventDashboardData,
 } from '../../services/athleteService';
+import { subscribeToStore } from '../../services/storeSync';
 import { NextFightCard } from '../../components/athlete/NextFightCard';
 import { FightCardList } from '../../components/athlete/FightCardList';
 import { AthleteProfileView } from '../../components/athlete/AthleteProfileView';
 import { PendingStatusView } from '../../components/athlete/PendingStatusView';
 import { Card } from '../../components/common/Card';
-import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
 import { Loader } from '../../components/common/Loader';
 import { ErrorMessage } from '../../components/feedback/ErrorMessage';
+import { LoginWelcomeAnimation } from '../../components/common/LoginWelcomeAnimation';
 import {
   Calendar,
   Swords,
@@ -33,7 +34,12 @@ export const AthletePortal: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Aba ativa de navegação interna
+  // Animação de boas-vindas cinematográfica pós-login
+  const [showWelcome, setShowWelcome] = useState<boolean>(
+    () => sessionStorage.getItem('ucu_login_welcome') === 'true'
+  );
+
+  // Aba ativa de navegação interna (controlada via Bottom Navigation)
   const [activeTab, setActiveTab] = useState<'geral' | 'card' | 'categorias' | 'midia' | 'perfil'>('geral');
 
   const loadData = async (slug: string) => {
@@ -51,6 +57,15 @@ export const AthletePortal: React.FC = () => {
 
   useEffect(() => {
     loadData(selectedEventSlug);
+
+    // Escutar alterações em tempo real do store unificado
+    const unsubscribe = subscribeToStore(() => {
+      loadData(selectedEventSlug);
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [selectedEventSlug, user]);
 
   const handleEventChange = (newSlug: string) => {
@@ -58,7 +73,7 @@ export const AthletePortal: React.FC = () => {
     showToast(`Alternando para o evento selecionado...`, 'info', 2000);
   };
 
-  if (isLoading) {
+  if (isLoading && !dashboardData) {
     return <Loader fullPage text="Carregando portal do atleta..." />;
   }
 
@@ -84,8 +99,26 @@ export const AthletePortal: React.FC = () => {
   }
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', paddingBottom: 'var(--space-8)' }}>
-      {/* 1. Barra Superior do Portal com Seletor de Eventos e Logout */}
+    <>
+      {showWelcome && (
+        <LoginWelcomeAnimation
+          onComplete={() => {
+            setShowWelcome(false);
+            sessionStorage.removeItem('ucu_login_welcome');
+          }}
+        />
+      )}
+
+      <div
+        className="animate-fade-in"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--space-4)',
+          paddingBottom: 'calc(80px + var(--safe-area-bottom))',
+        }}
+      >
+        {/* 1. Barra Superior com Evento e Logout */}
       <div
         style={{
           display: 'flex',
@@ -147,58 +180,7 @@ export const AthletePortal: React.FC = () => {
         </button>
       </div>
 
-      {/* 2. Abas de Navegação Interna do Portal (Scroll Horizontal Mobile) */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 'var(--space-2)',
-          overflowX: 'auto',
-          paddingBottom: '4px',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
-        <Button
-          variant={activeTab === 'geral' ? 'gold' : 'secondary'}
-          size="sm"
-          onClick={() => setActiveTab('geral')}
-        >
-          Visão Geral
-        </Button>
-        <Button
-          variant={activeTab === 'card' ? 'gold' : 'secondary'}
-          size="sm"
-          onClick={() => setActiveTab('card')}
-          leftIcon={<Swords size={14} />}
-        >
-          Card de Lutas ({dashboardData.eventMatches.length})
-        </Button>
-        <Button
-          variant={activeTab === 'categorias' ? 'gold' : 'secondary'}
-          size="sm"
-          onClick={() => setActiveTab('categorias')}
-          leftIcon={<Scale size={14} />}
-        >
-          Categorias
-        </Button>
-        <Button
-          variant={activeTab === 'midia' ? 'gold' : 'secondary'}
-          size="sm"
-          onClick={() => setActiveTab('midia')}
-          leftIcon={<Video size={14} />}
-        >
-          Vídeos ({dashboardData.mediaItems.length})
-        </Button>
-        <Button
-          variant={activeTab === 'perfil' ? 'gold' : 'secondary'}
-          size="sm"
-          onClick={() => setActiveTab('perfil')}
-          leftIcon={<User size={14} />}
-        >
-          Meu Perfil
-        </Button>
-      </div>
-
-      {/* 3. Conteúdo da Aba Selecionada */}
+      {/* 2. Conteúdo da Aba Selecionada */}
 
       {/* ABA: VISÃO GERAL */}
       {activeTab === 'geral' && (
@@ -305,9 +287,9 @@ export const AthletePortal: React.FC = () => {
         </Card>
       )}
 
-      {/* ABA: VÍDEOS E MÍDIA */}
+      {/* ABA: VÍDEOS E MÍDIA (CADASTRADOS PELO ADMIN) */}
       {activeTab === 'midia' && (
-        <Card title="Vídeos e Highlights Oficiais" subtitle="Gravações autorizadas e melhores momentos">
+        <Card title="Vídeos e Highlights Oficiais" subtitle="Adicionados e gerenciados pela organização">
           {dashboardData.mediaItems.length === 0 ? (
             <p style={{ color: 'var(--color-text-muted)', fontSize: 'var(--font-size-xs)', textAlign: 'center', padding: 'var(--space-4) 0' }}>
               Nenhum vídeo publicado ainda para esta edição.
@@ -359,8 +341,136 @@ export const AthletePortal: React.FC = () => {
           registration={dashboardData.currentRegistration}
           stats={dashboardData.careerStats}
           careerMatches={dashboardData.eventMatches}
+          onProfileUpdated={() => loadData(selectedEventSlug)}
         />
       )}
+
+      {/* 3. BARRA DE NAVEGAÇÃO INFERIOR FIXA EXCLUSIVA DO MEU CARD */}
+      <nav
+        aria-label="Navegação do Card do Atleta"
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 'var(--z-bottom-nav)',
+          backgroundColor: 'rgba(10, 10, 14, 0.96)',
+          backdropFilter: 'var(--glass-backdrop)',
+          borderTop: '1px solid rgba(212, 175, 55, 0.25)',
+          paddingBottom: 'max(var(--safe-area-bottom), 6px)',
+          paddingTop: '6px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-around',
+          boxShadow: '0 -8px 24px rgba(0, 0, 0, 0.8)',
+        }}
+      >
+        <button
+          onClick={() => setActiveTab('geral')}
+          className="interactive-tap"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            color: activeTab === 'geral' ? 'var(--color-gold-primary)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            padding: '4px 8px',
+          }}
+        >
+          <Calendar size={18} />
+          <span style={{ fontSize: '0.65rem', fontWeight: activeTab === 'geral' ? 700 : 500 }}>
+            Visão Geral
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('card')}
+          className="interactive-tap"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            color: activeTab === 'card' ? 'var(--color-gold-primary)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            padding: '4px 8px',
+          }}
+        >
+          <Swords size={18} />
+          <span style={{ fontSize: '0.65rem', fontWeight: activeTab === 'card' ? 700 : 500 }}>
+            Cards de Lutas
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('categorias')}
+          className="interactive-tap"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            color: activeTab === 'categorias' ? 'var(--color-gold-primary)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            padding: '4px 8px',
+          }}
+        >
+          <Scale size={18} />
+          <span style={{ fontSize: '0.65rem', fontWeight: activeTab === 'categorias' ? 700 : 500 }}>
+            Categorias
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('midia')}
+          className="interactive-tap"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            color: activeTab === 'midia' ? 'var(--color-gold-primary)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            padding: '4px 8px',
+          }}
+        >
+          <Video size={18} />
+          <span style={{ fontSize: '0.65rem', fontWeight: activeTab === 'midia' ? 700 : 500 }}>
+            Vídeos
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('perfil')}
+          className="interactive-tap"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '3px',
+            color: activeTab === 'perfil' ? 'var(--color-gold-primary)' : 'var(--color-text-muted)',
+            cursor: 'pointer',
+            padding: '4px 8px',
+          }}
+        >
+          <User size={18} />
+          <span style={{ fontSize: '0.65rem', fontWeight: activeTab === 'perfil' ? 700 : 500 }}>
+            Meu Perfil
+          </span>
+        </button>
+      </nav>
     </div>
+    </>
   );
 };

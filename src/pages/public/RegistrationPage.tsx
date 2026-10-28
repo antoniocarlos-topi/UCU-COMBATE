@@ -4,7 +4,6 @@ import { Card } from '../../components/common/Card';
 import { InputField } from '../../components/common/InputField';
 import { Button } from '../../components/common/Button';
 import { Badge } from '../../components/common/Badge';
-import { Avatar } from '../../components/common/Avatar';
 import { Loader } from '../../components/common/Loader';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -34,7 +33,6 @@ import {
   KeyRound,
   FileCheck,
   Info,
-  ChevronLeft,
 } from 'lucide-react';
 
 export const RegistrationPage: React.FC = () => {
@@ -330,27 +328,6 @@ export const RegistrationPage: React.FC = () => {
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', paddingBottom: 'var(--space-8)' }}>
-      {/* Botão de Retorno ao Convite */}
-      <button
-        onClick={() => navigate(`/convite/${eventData.slug}`)}
-        className="interactive-tap"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          background: 'transparent',
-          border: 'none',
-          color: 'var(--color-text-muted)',
-          fontSize: 'var(--font-size-xs)',
-          fontWeight: 600,
-          cursor: 'pointer',
-          width: 'fit-content',
-        }}
-      >
-        <ChevronLeft size={16} />
-        <span>Voltar ao Convite do Evento</span>
-      </button>
-
       <div>
         <h2 style={{ fontSize: 'var(--font-size-2xl)', textTransform: 'uppercase' }}>
           Inscrição de Combate
@@ -517,19 +494,115 @@ export const RegistrationPage: React.FC = () => {
               {isCompressingPhoto ? (
                 <Loader size="sm" text="Otimizando imagem para WebP..." />
               ) : avatarResult ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <Avatar src={avatarResult.previewUrl} alt="Prévia" size="lg" borderRing="gold" />
-                  <div style={{ textAlign: 'left' }}>
-                    <span style={{ fontSize: 'var(--font-size-sm)', fontWeight: 700, color: '#fff', display: 'block' }}>
-                      Foto Pronta para o Card
-                    </span>
-                    <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-gold-light)' }}>
-                      Tamanho otimizado: {avatarResult.compressedSizeKb} KB (WebP)
-                    </span>
-                    <span style={{ display: 'block', fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: '2px' }}>
-                      Toque para substituir
-                    </span>
+                <div
+                  style={{
+                    width: '100%',
+                    padding: 'var(--space-4)',
+                    backgroundColor: '#121218',
+                    border: '2px solid var(--color-border-gold)',
+                    borderRadius: 'var(--radius-lg)',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 20px rgba(212, 175, 55, 0.15)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '12px',
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: '3px',
+                      background: 'var(--gradient-gold)',
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: '0.68rem',
+                      fontFamily: 'var(--font-family-heading)',
+                      fontWeight: 800,
+                      color: 'var(--color-gold-primary)',
+                      letterSpacing: '0.18em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    Prévia Oficial do Card do Lutador
+                  </span>
+
+                  <div
+                    style={{
+                      width: '110px',
+                      height: '110px',
+                      borderRadius: '50%',
+                      padding: '3px',
+                      background: 'var(--gradient-gold)',
+                      boxShadow: '0 4px 18px rgba(212, 175, 55, 0.4)',
+                    }}
+                  >
+                    <img
+                      src={avatarResult.previewUrl}
+                      alt="Prévia do Card"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        display: 'block',
+                      }}
+                    />
                   </div>
+
+                  <div style={{ textAlign: 'center' }}>
+                    <h3
+                      style={{
+                        fontSize: 'var(--font-size-base)',
+                        fontWeight: 900,
+                        fontFamily: 'var(--font-family-heading)',
+                        color: '#ffffff',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      {nickname || 'Seu Apelido'}
+                    </h3>
+                    <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                      {fullName || 'Nome do Atleta'}
+                    </p>
+                    <div
+                      style={{
+                        marginTop: '6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        backgroundColor: 'rgba(212, 175, 55, 0.1)',
+                        border: '1px solid rgba(212, 175, 55, 0.3)',
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--color-gold-light)',
+                        fontWeight: 700,
+                      }}
+                    >
+                      <span>{detectedCategory?.name || 'Aguardando peso...'}</span>
+                      {declaredWeight && <span>• {declaredWeight} kg</span>}
+                    </div>
+                  </div>
+
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: '0.72rem',
+                      color: 'var(--color-text-muted)',
+                      textDecoration: 'underline',
+                      marginTop: '4px',
+                    }}
+                  >
+                    Toque para escolher outra foto
+                  </span>
                 </div>
               ) : (
                 <>

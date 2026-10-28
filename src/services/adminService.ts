@@ -21,6 +21,11 @@ import {
 } from '../utils/validationRules';
 import { DEFAULT_INAUGURAL_EVENT } from './eventService';
 import { SECOND_TEST_EVENT } from './athleteService';
+import {
+  getUnifiedStore,
+  saveUnifiedStore,
+  formatYoutubeEmbedUrl,
+} from './storeSync';
 
 // ==============================================================================
 // ESTADO EM MEMÓRIA RESILIENTE (PARA AMBIENTE LOCAL / DEMO / TESTES)
@@ -319,6 +324,38 @@ export const adminStore: AdminDataStore = {
   auditLogs: [...initialAuditLogs],
 };
 
+export function syncAdminStoreFromUnified(): void {
+  try {
+    const unified = getUnifiedStore();
+    adminStore.events = [...unified.events];
+    adminStore.registrations = [...unified.registrations];
+    adminStore.matches = [...unified.matches];
+    adminStore.announcements = [...unified.announcements];
+    adminStore.mediaItems = [...unified.mediaItems];
+    adminStore.auditLogs = [...unified.auditLogs];
+  } catch (err) {
+    console.warn('[AdminService] Falha ao sincronizar a partir do UnifiedStore:', err);
+  }
+}
+
+export function syncAdminStoreToUnified(): void {
+  try {
+    const unified = getUnifiedStore();
+    unified.events = [...adminStore.events];
+    unified.registrations = [...adminStore.registrations];
+    unified.matches = [...adminStore.matches];
+    unified.announcements = [...adminStore.announcements];
+    unified.mediaItems = [...adminStore.mediaItems];
+    unified.auditLogs = [...adminStore.auditLogs];
+    saveUnifiedStore(unified);
+  } catch (err) {
+    console.error('[AdminService] Falha ao sincronizar para o UnifiedStore:', err);
+  }
+}
+
+// Sincronização inicial automática
+syncAdminStoreFromUnified();
+
 function logAuditAction(
   eventId: string | null,
   action: string,
@@ -339,6 +376,9 @@ function logAuditAction(
     created_at: new Date().toISOString(),
   };
   adminStore.auditLogs.unshift(newLog);
+
+  // Sincronizar qualquer ação administrativa imediatamente para o store compartilhado
+  syncAdminStoreToUnified();
 }
 
 // ==============================================================================
@@ -354,6 +394,9 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   announcements: EventAnnouncement[];
   auditLogs: AuditLog[];
 }> {
+  // Sincronizar com inscrições e dados mais recentes salvos no storage
+  syncAdminStoreFromUnified();
+
   // Localiza evento ativo
   let activeEvent = adminStore.events.find((e) => e.slug === eventSlug);
   if (!activeEvent) {
@@ -531,9 +574,12 @@ export async function createOrUpdateMatch(
     roundName: string;
     scheduledTime?: string;
     status?: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+    videoUrl?: string;
   },
   adminNickname: string = 'Admin Principal'
 ): Promise<{ success: boolean; error?: string; match?: MatchFight }> {
+  syncAdminStoreFromUnified();
+
   // 1. Validação de adversários idênticos
   if (matchData.fighter1RegistrationId === matchData.fighter2RegistrationId) {
     return { success: false, error: 'Um atleta não pode ser casado contra si mesmo.' };
@@ -567,6 +613,11 @@ export async function createOrUpdateMatch(
     ? adminStore.matches.findIndex((m) => m.id === matchData.id)
     : -1;
 
+  const previousVideo = existingIndex >= 0 ? adminStore.matches[existingIndex].video_url : undefined;
+  const formattedVideo = matchData.videoUrl !== undefined
+    ? (matchData.videoUrl.trim() ? formatYoutubeEmbedUrl(matchData.videoUrl.trim()) : undefined)
+    : previousVideo;
+
   const matchToSave: MatchFight = {
     id: matchData.id || `match-${Date.now()}`,
     event_id: matchData.eventId,
@@ -575,8 +626,9 @@ export async function createOrUpdateMatch(
     round_name: matchData.roundName,
     fighter1_registration_id: f1.id,
     fighter2_registration_id: f2.id,
-    status: matchData.status || 'scheduled',
-    scheduled_time: matchData.scheduledTime || null,
+    status: matchData.status || (existingIndex >= 0 ? adminStore.matches[existingIndex].status : 'scheduled'),
+    scheduled_time: matchData.scheduledTime || (existingIndex >= 0 ? adminStore.matches[existingIndex].scheduled_time : null),
+    video_url: formattedVideo,
     fighter1: f1,
     fighter2: f2,
   };
@@ -606,7 +658,55 @@ export async function createOrUpdateMatch(
     );
   }
 
+  syncAdminStoreToUnified();
   return { success: true, match: matchToSave };
+}
+
+export async function deleteMatch(
+  matchId: string,
+  eventId: string,
+  adminNickname: string = 'Admin Principal'
+): Promise<{ success: boolean; error?: string }> {
+  syncAdminStoreFromUnified();
+  const index = adminStore.matches.findIndex((m) => m.id === matchId);
+  if (index === -1) {
+    return { success: false, error: 'Confronto não encontrado.' };
+  }
+  const removed = adminStore.matches.splice(index, 1)[0];
+  logAuditAction(
+    eventId,
+    'MATCH_DELETED',
+    'matches',
+    matchId,
+    `Confronto #${removed.match_order} foi excluído permanentemente.`,
+    adminNickname
+  );
+  syncAdminStoreToUnified();
+  return { success: true };
+}
+
+export async function updateMatchVideo(
+  matchId: string,
+  videoUrl: string,
+  eventId: string,
+  adminNickname: string = 'Admin Principal'
+): Promise<{ success: boolean; error?: string }> {
+  syncAdminStoreFromUnified();
+  const match = adminStore.matches.find((m) => m.id === matchId);
+  if (!match) {
+    return { success: false, error: 'Confronto não encontrado.' };
+  }
+  match.video_url = videoUrl.trim() ? formatYoutubeEmbedUrl(videoUrl.trim()) : undefined;
+  logAuditAction(
+    eventId,
+    'MATCH_VIDEO_UPDATED',
+    'matches',
+    matchId,
+    `Vídeo da luta #${match.match_order} configurado: ${videoUrl || 'removido'}.`,
+    adminNickname
+  );
+  syncAdminStoreToUnified();
+  return { success: true };
 }
 
 export async function recordOfficialMatchResult(
@@ -926,6 +1026,8 @@ export async function saveMediaItem(
     return { success: false, error: 'Título e URL do conteúdo são obrigatórios.' };
   }
 
+  const finalUrl = formatYoutubeEmbedUrl(mediaData.url.trim());
+
   const existingIndex = mediaData.id
     ? adminStore.mediaItems.findIndex((m) => m.id === mediaData.id)
     : -1;
@@ -934,6 +1036,7 @@ export async function saveMediaItem(
     adminStore.mediaItems[existingIndex] = {
       ...adminStore.mediaItems[existingIndex],
       ...mediaData,
+      url: finalUrl,
     };
   } else {
     const newMedia: MediaItem = {
@@ -942,7 +1045,7 @@ export async function saveMediaItem(
       title: mediaData.title.trim(),
       description: mediaData.description || '',
       media_type: mediaData.mediaType,
-      url: mediaData.url.trim(),
+      url: finalUrl,
       match_id: mediaData.matchId || null,
       is_public: mediaData.isPublic,
       created_at: new Date().toISOString(),

@@ -2,6 +2,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabaseClient';
 import { UserProfile } from '../types/app.types';
+import {
+  authenticateInUnifiedStore,
+  getUnifiedStore,
+} from '../services/storeSync';
 
 interface AuthContextType {
   user: User | null;
@@ -15,6 +19,7 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const SESSION_STORAGE_KEY = 'ucu_arena_current_session_v2';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -23,10 +28,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Carregar perfil e privilégios administrativos
+  // Carregar perfil e privilégios administrativos no Supabase
   const fetchProfileAndRole = async (userId: string) => {
     try {
-      // 1. Buscar perfil do atleta
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
@@ -37,7 +41,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(profileData as UserProfile);
       }
 
-      // 2. Verificar se o usuário possui registro na tabela admin_users
       const { data: adminData } = await supabase
         .from('admin_users')
         .select('role, is_active')
@@ -47,24 +50,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       setIsAdmin(!!adminData);
     } catch (err) {
-      console.error('[AuthContext] Erro ao carregar dados do usuário:', err);
+      console.error('[AuthContext] Erro ao carregar dados do usuário no Supabase:', err);
       setIsAdmin(false);
     }
   };
 
+  // Restaurar sessão local a partir do store unificado
+  const restoreLocalSession = () => {
+    try {
+      const savedUserId = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (!savedUserId) {
+        setIsLoading(false);
+        return;
+      }
+
+      const store = getUnifiedStore();
+      const storedUser = store.users.find((u) => u.id === savedUserId);
+
+      if (storedUser) {
+        const mockUser: User = {
+          id: storedUser.id,
+          app_metadata: {},
+          user_metadata: { nickname: storedUser.nickname, full_name: storedUser.fullName },
+          aud: 'authenticated',
+          created_at: storedUser.createdAt,
+        } as any;
+
+        setUser(mockUser);
+        setIsAdmin(storedUser.isAdmin);
+
+        // Buscar perfil correspondente no store
+        const reg = store.registrations.find(
+          (r) => r.profile?.id === storedUser.profileId || r.profile?.auth_user_id === storedUser.id
+        );
+        if (reg?.profile) {
+          setProfile(reg.profile);
+        } else if (storedUser.isAdmin) {
+          setProfile({
+            id: storedUser.profileId,
+            auth_user_id: storedUser.id,
+            full_name: storedUser.fullName,
+            nickname: storedUser.nickname,
+            recovery_email: storedUser.recoveryEmail,
+            phone: '',
+            birth_date: '1990-01-01',
+            is_minor: false,
+            image_consent: true,
+            terms_consent: true,
+            created_at: storedUser.createdAt,
+            updated_at: storedUser.createdAt,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[AuthContext] Erro ao restaurar sessão local:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    // 1. Obter sessão inicial
+    const isSupabaseConfigured = Boolean(
+      import.meta.env.VITE_SUPABASE_URL &&
+      !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
+    );
+
+    if (!isSupabaseConfigured) {
+      restoreLocalSession();
+      return;
+    }
+
+    // Fluxo com Supabase configurado
     supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
       setSession(initialSession);
       setUser(initialSession?.user ?? null);
       if (initialSession?.user) {
         fetchProfileAndRole(initialSession.user.id).finally(() => setIsLoading(false));
       } else {
-        setIsLoading(false);
+        restoreLocalSession();
       }
     });
 
-    // 2. Escutar mudanças de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
@@ -72,8 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentSession?.user) {
         fetchProfileAndRole(currentSession.user.id);
       } else {
-        setProfile(null);
-        setIsAdmin(false);
+        restoreLocalSession();
       }
       setIsLoading(false);
     });
@@ -92,30 +157,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
       );
 
-      // Modo resiliente para preview e testes locais sem conexão com Supabase
+      // Validação Real no Store Unificado (Modo Local / Demo / Resiliente)
       if (!isSupabaseConfigured) {
-        if (password.length < 6) {
-          return { error: 'A senha deve conter no mínimo 6 caracteres.' };
+        const authRes = authenticateInUnifiedStore(nickname, password);
+        if (!authRes.success || !authRes.user) {
+          return { error: authRes.error || 'Credenciais inválidas.' };
         }
 
-        const mockUser: User = {
-          id: 'auth-demo-user',
+        const authUser: User = {
+          id: authRes.user.id,
           app_metadata: {},
-          user_metadata: { nickname },
+          user_metadata: {
+            nickname: authRes.user.nickname,
+            full_name: authRes.user.fullName,
+          },
           aud: 'authenticated',
-          created_at: new Date().toISOString(),
+          created_at: authRes.user.createdAt,
         } as any;
 
-        setUser(mockUser);
-        if (nickname.toLowerCase().includes('admin')) {
-          setIsAdmin(true);
-        } else {
-          setIsAdmin(false);
+        setUser(authUser);
+        setProfile(authRes.profile || null);
+        setIsAdmin(Boolean(authRes.isAdmin));
+
+        try {
+          localStorage.setItem(SESSION_STORAGE_KEY, authRes.user.id);
+        } catch {
+          // localStorage pode falhar em contexto estrito
         }
+
         return {};
       }
 
-      // Chamada à Edge Function ou endpoint seguro de login por apelido
+      // Chamada à Edge Function ou endpoint do Supabase
       const { data, error: funcError } = await supabase.functions.invoke('auth-login', {
         body: { nickname: nickname.trim(), password },
       });
@@ -124,7 +197,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error: data?.message || 'Apelido ou senha incorretos.' };
       }
 
-      // Definir a sessão recebida
       await supabase.auth.setSession({
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
@@ -140,7 +212,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     setIsLoading(true);
-    await supabase.auth.signOut();
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    } catch {}
+
+    const isSupabaseConfigured = Boolean(
+      import.meta.env.VITE_SUPABASE_URL &&
+      !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
+    );
+
+    if (isSupabaseConfigured) {
+      await supabase.auth.signOut();
+    }
+
     setUser(null);
     setSession(null);
     setProfile(null);
@@ -150,7 +234,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshProfile = async () => {
     if (user) {
-      await fetchProfileAndRole(user.id);
+      const isSupabaseConfigured = Boolean(
+        import.meta.env.VITE_SUPABASE_URL &&
+        !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
+      );
+
+      if (isSupabaseConfigured) {
+        await fetchProfileAndRole(user.id);
+      } else {
+        restoreLocalSession();
+      }
     }
   };
 
