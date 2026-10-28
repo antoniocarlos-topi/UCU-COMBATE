@@ -1,0 +1,114 @@
+/* ==============================================================================
+   U.C.U ARENA — ESTILOS GLOBAIS E RESET MOBILE-FIRST
+   ============================================================================== */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-size: 16px;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background-color: var(--color-bg-base);
+  background-image: 
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(212, 175, 55, 0.08) 0%, transparent 80%),
+    radial-gradient(circle at 90% 80%, rgba(229, 25, 40, 0.04) 0%, transparent 50%);
+  background-attachment: fixed;
+  color: var(--color-text-primary);
+  line-height: var(--line-height-normal);
+  overflow-x: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Tipografia */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-family-heading);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.02em;
+}
+
+h1 { font-size: var(--font-size-3xl); font-weight: var(--font-weight-black); }
+h2 { font-size: var(--font-size-2xl); }
+h3 { font-size: var(--font-size-xl); }
+h4 { font-size: var(--font-size-lg); }
+
+p {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: var(--color-gold-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-gold-light);
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+/* Layout Container Responsivo Mobile-First */
+.app-container {
+  width: 100%;
+  max-width: 720px; /* Largura perfeita para leitura e usabilidade em telas médias */
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 1024px) {
+  .app-container-wide {
+    max-width: 1120px;
+  }
+}
+
+/* Scrollbar Elegante */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gold-muted);
+}
