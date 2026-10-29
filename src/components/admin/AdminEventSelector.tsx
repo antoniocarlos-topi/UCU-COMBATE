@@ -100,7 +100,7 @@ export const AdminEventSelector: React.FC<AdminEventSelectorProps> = ({
             </div>
 
             <p style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-              <MapPin size={12} /> {activeEvent.location_name} • {activeEvent.event_date ? new Date(activeEvent.event_date).toLocaleDateString('pt-BR') : 'Dia e horas a combinar'}
+              <MapPin size={12} /> {activeEvent.location_name} • {new Date(activeEvent.event_date).toLocaleDateString('pt-BR')}
             </p>
           </div>
         </div>

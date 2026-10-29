@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -42,47 +42,41 @@ export const AthletePortal: React.FC = () => {
   // Aba ativa de navegação interna (controlada via Bottom Navigation)
   const [activeTab, setActiveTab] = useState<'geral' | 'card' | 'categorias' | 'midia' | 'perfil'>('geral');
 
-  const loadData = useCallback(
-    async (slug: string, showSpinner = true) => {
-      if (showSpinner) {
-        setIsLoading(true);
-      }
-      setErrorMessage(null);
-      try {
-        const userIdentifier = user?.id || profile?.auth_user_id || profile?.id || '';
-        const nickname = profile?.nickname || (user?.user_metadata?.nickname as string | undefined);
-        const profileIdHint = profile?.id;
+  const loadData = async (slug: string) => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const userIdentifier = user?.id || profile?.auth_user_id || profile?.id || '';
+      const nickname = profile?.nickname || (user?.user_metadata?.nickname as string | undefined);
+      const profileIdHint = profile?.id;
 
-        const data = await getAthleteDashboardData(
-          userIdentifier || 'demo-auth-id',
-          slug,
-          nickname,
-          profileIdHint
-        );
-        setDashboardData(data);
-      } catch (err: any) {
-        console.error('[AthletePortal] Erro ao carregar dados:', err);
-        setErrorMessage('Não foi possível carregar as informações do evento.');
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [user?.id, profile?.id, profile?.nickname, profile?.auth_user_id, (user?.user_metadata as any)?.nickname]
-  );
+      const data = await getAthleteDashboardData(
+        userIdentifier || 'demo-auth-id',
+        slug,
+        nickname,
+        profileIdHint
+      );
+      setDashboardData(data);
+    } catch (err: any) {
+      console.error('[AthletePortal] Erro ao carregar dados:', err);
+      setErrorMessage('Não foi possível carregar as informações do evento.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Carregamento inicial com indicador visual
-    loadData(selectedEventSlug, !dashboardData);
+    loadData(selectedEventSlug);
 
-    // Escutar alterações do store unificado (atualização transparente em segundo plano)
+    // Escutar alterações em tempo real do store unificado
     const unsubscribe = subscribeToStore(() => {
-      loadData(selectedEventSlug, false);
+      loadData(selectedEventSlug);
     });
 
     return () => {
       unsubscribe();
     };
-  }, [selectedEventSlug, loadData]);
+  }, [selectedEventSlug, user, profile]);
 
   const handleEventChange = (newSlug: string) => {
     setSelectedEventSlug(newSlug);
@@ -98,7 +92,7 @@ export const AthletePortal: React.FC = () => {
       <ErrorMessage
         title="Erro de Carregamento"
         message={errorMessage || 'Dados do participante não encontrados.'}
-        onRetry={() => loadData(selectedEventSlug, true)}
+        onRetry={() => loadData(selectedEventSlug)}
       />
     );
   }
@@ -110,7 +104,7 @@ export const AthletePortal: React.FC = () => {
         registration={dashboardData.currentRegistration}
         event={dashboardData.selectedEvent}
         onLogout={logout}
-        onRefresh={() => loadData(selectedEventSlug, false)}
+        onRefresh={() => loadData(selectedEventSlug)}
       />
     );
   }
