@@ -25,6 +25,7 @@ import {
   BracketResult,
 } from '../../services/bracketEngine';
 import { DEFAULT_WEIGHT_CATEGORIES } from '../../utils/validationRules';
+import { subscribeToStore } from '../../services/storeSync';
 import {
   LayoutDashboard,
   Users,
@@ -36,6 +37,7 @@ import {
   GitBranch,
   Radio,
   Trophy,
+  RefreshCw,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -63,9 +65,10 @@ export const AdminDashboard: React.FC = () => {
   const [isCreateEventOpen, setIsCreateEventOpen] = useState(false);
   const [isEditEventOpen, setIsEditEventOpen] = useState(false);
   const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const loadData = async (slug: string) => {
-    setIsLoading(true);
+  const loadData = async (slug: string, isSilent: boolean = false) => {
+    if (!isSilent) setIsLoading(true);
     try {
       const summary = await getAdminDashboardSummary(slug);
       setActiveEvent(summary.activeEvent);
@@ -76,14 +79,38 @@ export const AdminDashboard: React.FC = () => {
       setAnnouncements(summary.announcements);
       setAuditLogs(summary.auditLogs);
     } catch (err) {
-      showToast('Erro ao carregar dados administrativos.', 'error');
+      if (!isSilent) {
+        showToast('Erro ao carregar dados administrativos.', 'error');
+      }
     } finally {
-      setIsLoading(false);
+      if (!isSilent) setIsLoading(false);
     }
+  };
+
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    await loadData(selectedEventSlug, true);
+    setIsRefreshing(false);
+    showToast('Dados sincronizados com a nuvem com sucesso!', 'success');
   };
 
   useEffect(() => {
     loadData(selectedEventSlug);
+
+    // Escuta atualizações do store local imediatamente
+    const unsubscribe = subscribeToStore(() => {
+      loadData(selectedEventSlug, true);
+    });
+
+    // Auto-polling em tempo real com a nuvem a cada 8 segundos
+    const interval = setInterval(() => {
+      loadData(selectedEventSlug, true);
+    }, 8000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, [selectedEventSlug]);
 
   const handleSelectEvent = (slug: string) => {
@@ -129,9 +156,21 @@ export const AdminDashboard: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
-          <ShieldCheck size={16} color="var(--color-gold-primary)" />
-          <span>Sessão Autenticada com RLS</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />}
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? 'Sincronizando...' : 'Atualizar Nuvem'}
+          </Button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)' }}>
+            <ShieldCheck size={16} color="var(--color-gold-primary)" />
+            <span>Banco Global Online</span>
+          </div>
         </div>
       </div>
 

@@ -91,17 +91,35 @@ export async function getEventInvitationBySlug(slug: string): Promise<EventInvit
   }
 
   try {
-    const fetchPromise = supabase
-      .from('events')
-      .select('*, weight_categories(*)')
-      .eq('slug', slug)
-      .maybeSingle();
+    const fetchPromise = (async () => {
+      const { data: eventData, error: eventErr } = await supabase
+        .from('events')
+        .select('*')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      if (eventErr || !eventData) return { data: null, error: eventErr };
+
+      const { data: catData } = await supabase
+        .from('weight_categories')
+        .select('*')
+        .eq('event_id', eventData.id)
+        .order('display_order', { ascending: true });
+
+      return {
+        data: {
+          ...eventData,
+          weight_categories: catData || [],
+        },
+        error: null,
+      };
+    })();
 
     const timeoutPromise = new Promise<{ data: null; error: any }>((_, reject) =>
       setTimeout(() => reject(new Error('Timeout de rede Supabase')), 2500)
     );
 
-    const { data: eventData, error } = await Promise.race([fetchPromise, timeoutPromise]) as any;
+    const { data: eventData, error } = (await Promise.race([fetchPromise, timeoutPromise])) as any;
 
     if (!error && eventData) {
       const categories: WeightCategoryRule[] = (eventData.weight_categories || []).map((wc: any) => ({
@@ -146,12 +164,18 @@ export async function getEventInvitationBySlug(slug: string): Promise<EventInvit
 export async function recordInvitationRefusal(slug: string, reason?: string): Promise<{ success: boolean }> {
   try {
     // Registra métrica anônima para controle do organizador
-    await supabase.from('audit_logs').insert({
-      action: 'INVITATION_REFUSED',
-      entity_type: 'events',
-      entity_id: '00000000-0000-0000-0000-000000000000',
-      changes_payload: { event_slug: slug, reason: reason || 'Optou por não participar', timestamp: new Date().toISOString() },
-    });
+    // Nota: audit_logs requer user_id (NOT NULL). Se não houver sessão,
+    // este insert falhará silenciosamente — comportamento desejado para recusas anônimas.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) {
+      await supabase.from('audit_logs').insert({
+        user_id: session.user.id,
+        action: 'INVITATION_REFUSED',
+        entity_type: 'events',
+        entity_id: '00000000-0000-0000-0000-000000000000',
+        changes_payload: { event_slug: slug, reason: reason || 'Optou por não participar', timestamp: new Date().toISOString() },
+      });
+    }
   } catch {
     // Falha silenciosa em caso de ausência de conexão, sem quebrar o usuário
   }

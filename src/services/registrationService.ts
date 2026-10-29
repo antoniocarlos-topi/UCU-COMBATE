@@ -176,47 +176,45 @@ export async function submitAthleteRegistration(
     return { success: false, error: localStoreRes.error };
   }
 
-  // 8. Persistência no Supabase (se configurado)
+  // 8. Persistência no Banco de Dados Global (Supabase)
   try {
+    const profileId = (localStoreRes as any).profileId || `prof-${Date.now()}`;
+    const regId = localStoreRes.registrationId;
+
+    // Verificar se Supabase está configurado
     const isSupabaseConfigured = Boolean(
       import.meta.env.VITE_SUPABASE_URL &&
       !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
     );
 
     if (isSupabaseConfigured) {
-      const { data: authData } = await supabase.auth.signUp({
-        email: data.recoveryEmail,
-        password: data.password,
-        options: {
-          data: {
-            full_name: data.fullName,
-            nickname: data.nickname,
+      // Tentar cadastro no auth
+      let finalAuthId: string | null = null;
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: data.recoveryEmail,
+          password: data.password,
+          options: {
+            data: {
+              full_name: data.fullName,
+              nickname: data.nickname,
+            },
           },
-        },
-      });
-
-      const userId = authData?.user?.id || `usr-${Date.now()}`;
-      let avatarUrl = avatarDataUrl;
-
-      if (authData?.user?.id && data.avatarFile) {
-        const filePath = `${userId}/${data.avatarFile.name}`;
-        const { data: uploadData } = await supabase.storage
-          .from('avatars')
-          .upload(filePath, data.avatarFile, {
-            contentType: 'image/webp',
-            upsert: true,
-          });
-
-        if (uploadData?.path) {
-          const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(uploadData.path);
-          avatarUrl = publicUrlData.publicUrl;
+        });
+        if (!authError && authData?.user?.id) {
+          finalAuthId = authData.user.id;
         }
+      } catch {
+        // Prossegue mesmo se auth falhar por rate limit ou confirmação pendente
       }
 
-      const { data: profileRecord } = await supabase
-        .from('profiles')
-        .insert({
-          auth_user_id: userId,
+      // Gravar no perfil da nuvem
+      // IMPORTANTE: Não incluir 'nickname_normalized' pois é uma coluna GENERATED ALWAYS
+      // no PostgreSQL e não pode ser inserida/atualizada diretamente.
+      if (finalAuthId) {
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: profileId,
+          auth_user_id: finalAuthId,
           full_name: data.fullName,
           nickname: data.nickname,
           recovery_email: data.recoveryEmail,
@@ -229,32 +227,42 @@ export async function submitAthleteRegistration(
           guardian_document: isMinor ? data.guardianDoc : null,
           image_consent: data.imageConsent,
           terms_consent: data.termsConsent,
-          avatar_url: avatarUrl,
-        })
-        .select('id')
-        .maybeSingle();
+          avatar_url: avatarDataUrl,
+        }, { onConflict: 'id' });
 
-      const profileId = profileRecord?.id || `prof-${Date.now()}`;
+        if (profileError) {
+          console.warn('[RegistrationService] Erro ao sincronizar perfil no Supabase:', profileError.message);
+        } else {
+          console.info('[RegistrationService] Perfil sincronizado com Supabase com sucesso.');
+        }
 
-      await supabase
-        .from('event_registrations')
-        .insert({
+        // Gravar a inscrição no evento na nuvem
+        const { error: regError } = await supabase.from('event_registrations').upsert({
+          id: regId,
           event_id: data.event.id,
           profile_id: profileId,
-          weight_category_id: category.id || 'cat-default',
+          weight_category_id: category.id || 'cat-meio-medio',
           declared_weight: weightVal.parsedWeight,
           status: 'pending',
           guardian_authorized: isMinor,
-        });
+        }, { onConflict: 'id' });
+
+        if (regError) {
+          console.warn('[RegistrationService] Erro ao sincronizar inscrição no Supabase:', regError.message);
+        } else {
+          console.info('[RegistrationService] Inscrição sincronizada com Supabase com sucesso.');
+        }
+      }
     }
 
     return {
       success: true,
-      registrationId: localStoreRes.registrationId,
+      registrationId: regId,
       status: 'pending',
       whatsappUrl: data.event.whatsapp_group_url,
     };
   } catch (err: any) {
+    console.error('[RegistrationService] Exceção na sincronização com Supabase:', err);
     return {
       success: true,
       registrationId: localStoreRes.registrationId,

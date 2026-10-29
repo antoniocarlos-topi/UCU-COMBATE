@@ -189,20 +189,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       // Chamada à Edge Function ou endpoint do Supabase
-      const { data, error: funcError } = await supabase.functions.invoke('auth-login', {
-        body: { nickname: nickname.trim(), password },
-      });
+      try {
+        const { data, error: funcError } = await supabase.functions.invoke('auth-login', {
+          body: { nickname: nickname.trim(), password },
+        });
 
-      if (funcError || !data?.session) {
-        return { error: data?.message || 'Apelido ou senha incorretos.' };
+        if (!funcError && data?.session) {
+          await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          });
+          return {};
+        }
+      } catch (invokeErr) {
+        console.warn('[AuthContext] Edge function auth-login indisponível, usando autenticação resiliente local:', invokeErr);
       }
 
-      await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
+      // Fallback resiliente: autenticação no store unificado (permite login de admin e atletas locais)
+      const authRes = authenticateInUnifiedStore(nickname, password);
+      if (authRes.success && authRes.user) {
+        const authUser: User = {
+          id: authRes.user.id,
+          app_metadata: {},
+          user_metadata: {
+            nickname: authRes.user.nickname,
+            full_name: authRes.user.fullName,
+          },
+          aud: 'authenticated',
+          created_at: authRes.user.createdAt,
+        } as any;
 
-      return {};
+        setUser(authUser);
+        setProfile(authRes.profile || null);
+        setIsAdmin(Boolean(authRes.isAdmin));
+
+        try {
+          localStorage.setItem(SESSION_STORAGE_KEY, authRes.user.id);
+        } catch {}
+
+        return {};
+      }
+
+      return { error: authRes.error || 'Apelido ou senha incorretos.' };
     } catch (err) {
       return { error: 'Falha de comunicação com o servidor de autenticação.' };
     } finally {

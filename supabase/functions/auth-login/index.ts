@@ -76,12 +76,24 @@ serve(async (req: Request) => {
 
     const normalizedNickname = nickname.trim().toLowerCase();
 
-    // 1. Localizar o perfil pelo apelido normalizado
-    const { data: profile, error: profileError } = await supabaseAdmin
+    // 1. Localizar o perfil pelo apelido normalizado com fallback case-insensitive
+    let { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('auth_user_id, recovery_email, full_name, nickname, avatar_url')
       .eq('nickname_normalized', normalizedNickname)
       .maybeSingle();
+
+    if (!profile) {
+      const { data: fallbackProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('auth_user_id, recovery_email, full_name, nickname, avatar_url')
+        .ilike('nickname', normalizedNickname)
+        .maybeSingle();
+      if (fallbackProfile) {
+        profile = fallbackProfile;
+        profileError = null;
+      }
+    }
 
     // Resposta de erro genérica e constante para mitigar enumeração de contas
     const GENERIC_AUTH_ERROR = 'Apelido ou senha incorretos.';

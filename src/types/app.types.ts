@@ -100,6 +100,7 @@ export interface EventRegistration {
   guardian_authorized: boolean;
   checkin_status: boolean;
   registered_at: string;
+  reviewed_at?: string | null;
   profile?: UserProfile;
   weight_category?: WeightCategory;
 }

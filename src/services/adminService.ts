@@ -26,6 +26,7 @@ import {
   saveUnifiedStore,
   formatYoutubeEmbedUrl,
 } from './storeSync';
+import { supabase } from '../lib/supabaseClient';
 
 // ==============================================================================
 // ESTADO EM MEMÓRIA RESILIENTE (PARA AMBIENTE LOCAL / DEMO / TESTES)
@@ -394,8 +395,91 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   announcements: EventAnnouncement[];
   auditLogs: AuditLog[];
 }> {
-  // Sincronizar com inscrições e dados mais recentes salvos no storage
+  // 1. Sincronizar com inscrições e dados mais recentes salvos no storage local
   syncAdminStoreFromUnified();
+
+  // 2. Sincronizar com o banco de dados global Supabase em tempo real
+  try {
+    // Busca paralela e resiliente para não depender de restrições de chave estrangeira no cache do PostgREST
+    const [regRes, profRes, catRes] = await Promise.all([
+      supabase.from('event_registrations').select('*'),
+      supabase.from('profiles').select('*'),
+      supabase.from('weight_categories').select('*'),
+    ]);
+
+    if (!regRes.error && regRes.data && regRes.data.length > 0) {
+      const profMap = new Map((profRes.data || []).map((p: any) => [p.id, p]));
+      const catMap = new Map((catRes.data || []).map((c: any) => [c.id, c]));
+
+      const mappedCloudRegs: EventRegistration[] = regRes.data.map((cr: any) => {
+        const p = profMap.get(cr.profile_id);
+        const c = catMap.get(cr.weight_category_id);
+        return {
+          id: cr.id,
+          event_id: cr.event_id,
+          profile_id: cr.profile_id,
+          weight_category_id: cr.weight_category_id,
+          declared_weight: Number(cr.declared_weight),
+          verified_weight: cr.verified_weight ? Number(cr.verified_weight) : null,
+          status: cr.status as any,
+          rejection_reason: cr.rejection_reason || null,
+          guardian_authorized: Boolean(cr.guardian_authorized),
+          checkin_status: Boolean(cr.checkin_status),
+          registered_at: cr.registered_at,
+          reviewed_at: cr.reviewed_at || null,
+          profile: p
+            ? {
+                id: p.id,
+                auth_user_id: p.auth_user_id,
+                full_name: p.full_name,
+                nickname: p.nickname,
+                recovery_email: p.recovery_email,
+                phone: p.phone,
+                birth_date: p.birth_date,
+                is_minor: Boolean(p.is_minor),
+                guardian_name: p.guardian_name,
+                guardian_relationship: p.guardian_relationship,
+                guardian_phone: p.guardian_phone,
+                guardian_document: p.guardian_document,
+                image_consent: Boolean(p.image_consent),
+                terms_consent: Boolean(p.terms_consent),
+                avatar_url: p.avatar_url,
+                created_at: p.created_at,
+                updated_at: p.updated_at,
+              }
+            : undefined,
+          weight_category: c
+            ? {
+                id: c.id,
+                event_id: c.event_id,
+                name: c.name,
+                min_weight: Number(c.min_weight),
+                max_weight: Number(c.max_weight),
+                display_order: Number(c.display_order || 1),
+              }
+            : undefined,
+        };
+      });
+
+      // Mesclar registros da nuvem preservando integridade
+      const cloudMap = new Map<string, EventRegistration>();
+      for (const reg of mappedCloudRegs) {
+        cloudMap.set(reg.id, reg);
+      }
+
+      // Adiciona registros locais que ainda não subiram
+      for (const localReg of adminStore.registrations) {
+        if (!cloudMap.has(localReg.id)) {
+          cloudMap.set(localReg.id, localReg);
+        }
+      }
+
+      adminStore.registrations = Array.from(cloudMap.values());
+      syncAdminStoreToUnified();
+    }
+  } catch (err) {
+    console.warn('[AdminService] Falha na sincronização cloud em tempo real:', err);
+  }
 
   // Localiza evento ativo
   let activeEvent = adminStore.events.find((e) => e.slug === eventSlug);
@@ -451,8 +535,19 @@ export async function approveAthleteRegistration(
   const reg = adminStore.registrations.find((r) => r.id === registrationId);
   if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
 
+  const nowIso = new Date().toISOString();
   reg.status = 'approved';
   reg.rejection_reason = null;
+  reg.reviewed_at = nowIso;
+
+  try {
+    await supabase
+      .from('event_registrations')
+      .update({ status: 'approved', rejection_reason: null, reviewed_at: nowIso })
+      .eq('id', registrationId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao aprovar no Supabase:', err);
+  }
 
   logAuditAction(
     reg.event_id,
@@ -463,6 +558,7 @@ export async function approveAthleteRegistration(
     adminNickname
   );
 
+  syncAdminStoreToUnified();
   return { success: true };
 }
 
@@ -478,8 +574,19 @@ export async function rejectAthleteRegistration(
   const reg = adminStore.registrations.find((r) => r.id === registrationId);
   if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
 
+  const nowIso = new Date().toISOString();
   reg.status = 'rejected';
   reg.rejection_reason = reason.trim();
+  reg.reviewed_at = nowIso;
+
+  try {
+    await supabase
+      .from('event_registrations')
+      .update({ status: 'rejected', rejection_reason: reason.trim(), reviewed_at: nowIso })
+      .eq('id', registrationId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao rejeitar no Supabase:', err);
+  }
 
   logAuditAction(
     reg.event_id,
@@ -490,6 +597,7 @@ export async function rejectAthleteRegistration(
     adminNickname
   );
 
+  syncAdminStoreToUnified();
   return { success: true };
 }
 
@@ -501,8 +609,19 @@ export async function suspendAthleteRegistration(
   const reg = adminStore.registrations.find((r) => r.id === registrationId);
   if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
 
+  const nowIso = new Date().toISOString();
   reg.status = 'suspended';
   reg.rejection_reason = reason.trim() || 'Suspenso pela organização administrativa.';
+  reg.reviewed_at = nowIso;
+
+  try {
+    await supabase
+      .from('event_registrations')
+      .update({ status: 'suspended', rejection_reason: reason.trim() || 'Suspenso pela organização', reviewed_at: nowIso })
+      .eq('id', registrationId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao suspender no Supabase:', err);
+  }
 
   logAuditAction(
     reg.event_id,
@@ -513,6 +632,7 @@ export async function suspendAthleteRegistration(
     adminNickname
   );
 
+  syncAdminStoreToUnified();
   return { success: true };
 }
 
@@ -532,6 +652,15 @@ export async function recordOfficialWeighIn(
   const prevWeight = reg.verified_weight;
   reg.verified_weight = Number(officialWeight.toFixed(2));
   reg.checkin_status = true;
+
+  try {
+    await supabase
+      .from('event_registrations')
+      .update({ verified_weight: Number(officialWeight.toFixed(2)), checkin_status: true })
+      .eq('id', registrationId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao gravar pesagem no Supabase:', err);
+  }
 
   // Verifica se o peso oficial ainda se enquadra na categoria
   let reallocatedCategory: string | undefined = undefined;
@@ -556,6 +685,7 @@ export async function recordOfficialWeighIn(
     adminNickname
   );
 
+  syncAdminStoreToUnified();
   return { success: true, reallocatedCategory };
 }
 

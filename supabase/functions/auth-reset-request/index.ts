@@ -32,12 +32,23 @@ serve(async (req: Request) => {
 
     const normalizedNickname = nickname.trim().toLowerCase();
 
-    // 1. Localizar email de recuperação silenciosamente
-    const { data: profile } = await supabaseAdmin
+    // 1. Localizar email de recuperação silenciosamente (com fallback case-insensitive)
+    let { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('recovery_email')
       .eq('nickname_normalized', normalizedNickname)
       .maybeSingle();
+
+    if (!profile?.recovery_email) {
+      const { data: fallbackProfile } = await supabaseAdmin
+        .from('profiles')
+        .select('recovery_email')
+        .ilike('nickname', normalizedNickname)
+        .maybeSingle();
+      if (fallbackProfile) {
+        profile = fallbackProfile;
+      }
+    }
 
     if (profile?.recovery_email) {
       // 2. Disparar link de redefinição oficial do Supabase para o e-mail cadastrado

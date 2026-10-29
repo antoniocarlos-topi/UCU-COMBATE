@@ -550,7 +550,7 @@ export function registerAthleteInUnifiedStore(params: {
   guardianDoc?: string;
   imageConsent: boolean;
   termsConsent: boolean;
-}): { success: boolean; registrationId: string; error?: string } {
+}): { success: boolean; registrationId: string; profileId?: string; error?: string } {
   const store = getUnifiedStore();
   const cleanNick = params.nickname.trim();
   const normalized = cleanNick.toLowerCase();
@@ -629,6 +629,7 @@ export function registerAthleteInUnifiedStore(params: {
   return {
     success: true,
     registrationId: regId,
+    profileId,
   };
 }
 

@@ -52,10 +52,18 @@ USING (public.is_admin());
 -- Nenhum usuário comum consegue consultar quem são os admins nem inserir a si próprio
 CREATE POLICY "admin_users_select_admin_only"
 ON public.admin_users FOR SELECT
+USING (user_id = auth.uid() OR public.is_admin());
+
+CREATE POLICY "admin_users_insert_admin_only"
+ON public.admin_users FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "admin_users_update_admin_only"
+ON public.admin_users FOR UPDATE
 USING (public.is_admin());
 
-CREATE POLICY "admin_users_all_admin_only"
-ON public.admin_users FOR ALL
+CREATE POLICY "admin_users_delete_admin_only"
+ON public.admin_users FOR DELETE
 USING (public.is_admin());
 
 -- 4. POLÍTICAS PARA EVENTS
@@ -67,8 +75,16 @@ USING (
     OR public.is_admin()
 );
 
-CREATE POLICY "events_modify_admin_only"
-ON public.events FOR ALL
+CREATE POLICY "events_insert_admin_only"
+ON public.events FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "events_update_admin_only"
+ON public.events FOR UPDATE
+USING (public.is_admin());
+
+CREATE POLICY "events_delete_admin_only"
+ON public.events FOR DELETE
 USING (public.is_admin());
 
 -- 5. POLÍTICAS PARA WEIGHT_CATEGORIES
@@ -76,8 +92,16 @@ CREATE POLICY "weight_categories_select_public"
 ON public.weight_categories FOR SELECT
 USING (true);
 
-CREATE POLICY "weight_categories_modify_admin_only"
-ON public.weight_categories FOR ALL
+CREATE POLICY "weight_categories_insert_admin_only"
+ON public.weight_categories FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "weight_categories_update_admin_only"
+ON public.weight_categories FOR UPDATE
+USING (public.is_admin());
+
+CREATE POLICY "weight_categories_delete_admin_only"
+ON public.weight_categories FOR DELETE
 USING (public.is_admin());
 
 -- 6. POLÍTICAS PARA EVENT_REGISTRATIONS
@@ -123,8 +147,16 @@ CREATE POLICY "matches_select_public"
 ON public.matches FOR SELECT
 USING (true);
 
-CREATE POLICY "matches_modify_admin_only"
-ON public.matches FOR ALL
+CREATE POLICY "matches_insert_admin_only"
+ON public.matches FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "matches_update_admin_only"
+ON public.matches FOR UPDATE
+USING (public.is_admin());
+
+CREATE POLICY "matches_delete_admin_only"
+ON public.matches FOR DELETE
 USING (public.is_admin());
 
 -- 8. POLÍTICAS PARA MEDIA_ITEMS E COMUNICADOS
@@ -132,16 +164,32 @@ CREATE POLICY "media_select_public"
 ON public.media_items FOR SELECT
 USING (true);
 
-CREATE POLICY "media_modify_admin_only"
-ON public.media_items FOR ALL
+CREATE POLICY "media_insert_admin_only"
+ON public.media_items FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "media_update_admin_only"
+ON public.media_items FOR UPDATE
+USING (public.is_admin());
+
+CREATE POLICY "media_delete_admin_only"
+ON public.media_items FOR DELETE
 USING (public.is_admin());
 
 CREATE POLICY "announcements_select_public"
 ON public.event_announcements FOR SELECT
 USING (true);
 
-CREATE POLICY "announcements_modify_admin_only"
-ON public.event_announcements FOR ALL
+CREATE POLICY "announcements_insert_admin_only"
+ON public.event_announcements FOR INSERT
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "announcements_update_admin_only"
+ON public.event_announcements FOR UPDATE
+USING (public.is_admin());
+
+CREATE POLICY "announcements_delete_admin_only"
+ON public.event_announcements FOR DELETE
 USING (public.is_admin());
 
 -- 9. POLÍTICAS PARA AUDIT_LOGS

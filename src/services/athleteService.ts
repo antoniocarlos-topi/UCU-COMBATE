@@ -136,20 +136,45 @@ export async function getAthleteDashboardData(
         .maybeSingle();
 
       if (profile) {
-        const { data: registrations } = await supabase
-          .from('event_registrations')
-          .select('*, events(*), weight_categories(*)')
-          .eq('profile_id', profile.id);
+        const [regRes, evtRes, catRes] = await Promise.all([
+          supabase.from('event_registrations').select('*').eq('profile_id', profile.id),
+          supabase.from('events').select('*'),
+          supabase.from('weight_categories').select('*'),
+        ]);
 
-        const currentReg = (registrations || []).find(
+        const evtMap = new Map((evtRes.data || []).map((e: any) => [e.id, e]));
+        const catMap = new Map((catRes.data || []).map((c: any) => [c.id, c]));
+
+        const registrations = (regRes.data || []).map((r: any) => ({
+          ...r,
+          events: evtMap.get(r.event_id),
+          weight_categories: catMap.get(r.weight_category_id),
+        }));
+
+        const currentReg = registrations.find(
           (r: any) => r.events?.slug === eventSlug
         );
 
         if (currentReg) {
-          const { data: matchesData } = await supabase
+          const { data: rawMatches } = await supabase
             .from('matches')
-            .select('*, fighter1:fighter1_registration_id(profile:profiles(*)), fighter2:fighter2_registration_id(profile:profiles(*))')
+            .select('*')
             .eq('event_id', currentReg.event_id);
+
+          const { data: allProfiles } = await supabase.from('profiles').select('*');
+          const profLookup = new Map((allProfiles || []).map((p: any) => [p.id, p]));
+
+          const eventMatches: MatchFight[] = (rawMatches || []).map((m: any) => ({
+            ...m,
+            fighter1: {
+              id: m.fighter1_registration_id,
+              profile: profLookup.get(m.fighter1_registration_id),
+            },
+            fighter2: {
+              id: m.fighter2_registration_id,
+              profile: profLookup.get(m.fighter2_registration_id),
+            },
+          })) as any;
 
           const { data: announcementsData } = await supabase
             .from('event_announcements')
@@ -162,7 +187,6 @@ export async function getAthleteDashboardData(
             .select('*')
             .eq('event_id', currentReg.event_id);
 
-          const eventMatches: MatchFight[] = matchesData || [];
           const nextMatch =
             eventMatches.find(
               (m) =>
