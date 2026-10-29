@@ -141,7 +141,7 @@ export const PendingStatusView: React.FC<PendingStatusViewProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
             {onRefresh && (
               <Button
-                variant="primary"
+                variant="gold"
                 size="md"
                 fullWidth
                 isLoading={isChecking}

@@ -11,7 +11,7 @@ import {
   UserProfile,
 } from '../types/app.types';
 import { DEFAULT_INAUGURAL_EVENT, EventInvitationData, SECOND_TEST_EVENT } from './eventService';
-import { getUnifiedStore } from './storeSync';
+import { getUnifiedStore, saveUnifiedStore } from './storeSync';
 
 export { SECOND_TEST_EVENT };
 

@@ -601,31 +601,47 @@ export async function approveAthleteRegistration(
   registrationId: string,
   adminNickname: string = 'Admin Principal'
 ): Promise<{ success: boolean; error?: string }> {
-  const reg = adminStore.registrations.find((r) => r.id === registrationId);
-  if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
-
   const nowIso = new Date().toISOString();
-  reg.status = 'approved';
-  reg.rejection_reason = null;
-  reg.reviewed_at = nowIso;
 
+  // 1. Invocar RPC com privilégios de segurança no Supabase (garantia multi-dispositivo)
+  try {
+    const { error: rpcErr } = await supabase.rpc('admin_approve_registration', {
+      p_reg_id: registrationId,
+      p_admin_name: adminNickname,
+    });
+    if (rpcErr) {
+      console.warn('[AdminService] RPC admin_approve_registration aviso:', rpcErr);
+    }
+  } catch (rpcEx) {
+    console.warn('[AdminService] RPC admin_approve_registration exceção:', rpcEx);
+  }
+
+  // 2. Atualizar diretamente na tabela event_registrations na nuvem
   try {
     await supabase
       .from('event_registrations')
       .update({ status: 'approved', rejection_reason: null, reviewed_at: nowIso })
-      .eq('id', registrationId);
+      .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`);
   } catch (err) {
-    console.warn('[AdminService] Falha ao aprovar no Supabase:', err);
+    console.warn('[AdminService] Falha ao aprovar no Supabase via update:', err);
   }
 
-  logAuditAction(
-    reg.event_id,
-    'ATHLETE_APPROVED',
-    'event_registrations',
-    reg.id,
-    `Atleta "${reg.profile?.nickname}" aprovado com sucesso no evento.`,
-    adminNickname
-  );
+  // 3. Atualizar no store de memória administrativa
+  const reg = adminStore.registrations.find((r) => r.id === registrationId || r.profile_id === registrationId);
+  if (reg) {
+    reg.status = 'approved';
+    reg.rejection_reason = null;
+    reg.reviewed_at = nowIso;
+
+    logAuditAction(
+      reg.event_id,
+      'ATHLETE_APPROVED',
+      'event_registrations',
+      reg.id,
+      `Atleta "${reg.profile?.nickname || registrationId}" aprovado com sucesso no evento.`,
+      adminNickname
+    );
+  }
 
   syncAdminStoreToUnified();
   return { success: true };
@@ -640,31 +656,45 @@ export async function rejectAthleteRegistration(
     return { success: false, error: 'É obrigatório informar o motivo da recusa.' };
   }
 
-  const reg = adminStore.registrations.find((r) => r.id === registrationId);
-  if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
-
   const nowIso = new Date().toISOString();
-  reg.status = 'rejected';
-  reg.rejection_reason = reason.trim();
-  reg.reviewed_at = nowIso;
+
+  try {
+    const { error: rpcErr } = await supabase.rpc('admin_reject_registration', {
+      p_reg_id: registrationId,
+      p_reason: reason.trim(),
+      p_admin_name: adminNickname,
+    });
+    if (rpcErr) {
+      console.warn('[AdminService] RPC admin_reject_registration aviso:', rpcErr);
+    }
+  } catch (rpcEx) {
+    console.warn('[AdminService] RPC admin_reject_registration exceção:', rpcEx);
+  }
 
   try {
     await supabase
       .from('event_registrations')
       .update({ status: 'rejected', rejection_reason: reason.trim(), reviewed_at: nowIso })
-      .eq('id', registrationId);
+      .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`);
   } catch (err) {
     console.warn('[AdminService] Falha ao rejeitar no Supabase:', err);
   }
 
-  logAuditAction(
-    reg.event_id,
-    'ATHLETE_REJECTED',
-    'event_registrations',
-    reg.id,
-    `Inscrição de "${reg.profile?.nickname}" recusada. Motivo: ${reason}`,
-    adminNickname
-  );
+  const reg = adminStore.registrations.find((r) => r.id === registrationId || r.profile_id === registrationId);
+  if (reg) {
+    reg.status = 'rejected';
+    reg.rejection_reason = reason.trim();
+    reg.reviewed_at = nowIso;
+
+    logAuditAction(
+      reg.event_id,
+      'ATHLETE_REJECTED',
+      'event_registrations',
+      reg.id,
+      `Inscrição de "${reg.profile?.nickname || registrationId}" recusada. Motivo: ${reason}`,
+      adminNickname
+    );
+  }
 
   syncAdminStoreToUnified();
   return { success: true };
@@ -675,31 +705,45 @@ export async function suspendAthleteRegistration(
   reason: string,
   adminNickname: string = 'Admin Principal'
 ): Promise<{ success: boolean; error?: string }> {
-  const reg = adminStore.registrations.find((r) => r.id === registrationId);
-  if (!reg) return { success: false, error: 'Inscrição não encontrada.' };
-
   const nowIso = new Date().toISOString();
-  reg.status = 'suspended';
-  reg.rejection_reason = reason.trim() || 'Suspenso pela organização administrativa.';
-  reg.reviewed_at = nowIso;
+
+  try {
+    const { error: rpcErr } = await supabase.rpc('admin_suspend_registration', {
+      p_reg_id: registrationId,
+      p_reason: reason.trim() || 'Suspenso pela organização administrativa.',
+      p_admin_name: adminNickname,
+    });
+    if (rpcErr) {
+      console.warn('[AdminService] RPC admin_suspend_registration aviso:', rpcErr);
+    }
+  } catch (rpcEx) {
+    console.warn('[AdminService] RPC admin_suspend_registration exceção:', rpcEx);
+  }
 
   try {
     await supabase
       .from('event_registrations')
       .update({ status: 'suspended', rejection_reason: reason.trim() || 'Suspenso pela organização', reviewed_at: nowIso })
-      .eq('id', registrationId);
+      .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`);
   } catch (err) {
     console.warn('[AdminService] Falha ao suspender no Supabase:', err);
   }
 
-  logAuditAction(
-    reg.event_id,
-    'ATHLETE_SUSPENDED',
-    'event_registrations',
-    reg.id,
-    `Atleta "${reg.profile?.nickname}" suspenso. Motivo: ${reason}`,
-    adminNickname
-  );
+  const reg = adminStore.registrations.find((r) => r.id === registrationId || r.profile_id === registrationId);
+  if (reg) {
+    reg.status = 'suspended';
+    reg.rejection_reason = reason.trim() || 'Suspenso pela organização administrativa.';
+    reg.reviewed_at = nowIso;
+
+    logAuditAction(
+      reg.event_id,
+      'ATHLETE_SUSPENDED',
+      'event_registrations',
+      reg.id,
+      `Atleta "${reg.profile?.nickname || registrationId}" suspenso. Motivo: ${reason}`,
+      adminNickname
+    );
+  }
 
   syncAdminStoreToUnified();
   return { success: true };
@@ -726,7 +770,7 @@ export async function recordOfficialWeighIn(
     await supabase
       .from('event_registrations')
       .update({ verified_weight: Number(officialWeight.toFixed(2)), checkin_status: true })
-      .eq('id', registrationId);
+      .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`);
   } catch (err) {
     console.warn('[AdminService] Falha ao gravar pesagem no Supabase:', err);
   }
