@@ -1,59 +1,115 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '../common/Card';
 import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { EventRegistration } from '../../types/app.types';
 import { EventInvitationData } from '../../services/eventService';
-import { Clock, MessageCircle, AlertCircle, Scale } from 'lucide-react';
+import { Clock, MessageCircle, AlertCircle, Scale, RefreshCw, ShieldAlert } from 'lucide-react';
 
 export interface PendingStatusViewProps {
   registration: EventRegistration;
   event: EventInvitationData;
   onLogout: () => void;
+  onRefresh?: () => void;
 }
 
 export const PendingStatusView: React.FC<PendingStatusViewProps> = ({
   registration,
   event,
   onLogout,
+  onRefresh,
 }) => {
   const isRejected = registration.status === 'rejected';
+  const isSuspended = registration.status === 'suspended';
   const hasValidWhatsApp = !!event.whatsapp_group_url && event.whatsapp_group_url.startsWith('https://');
+
+  const [isChecking, setIsChecking] = useState(false);
+
+  // Verificação periódica automática a cada 6 segundos enquanto aguarda aprovação
+  useEffect(() => {
+    if (!onRefresh) return;
+    const interval = setInterval(() => {
+      onRefresh();
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [onRefresh]);
+
+  const handleManualRefresh = async () => {
+    if (!onRefresh) return;
+    setIsChecking(true);
+    await onRefresh();
+    setTimeout(() => setIsChecking(false), 800);
+  };
+
+  const getHeaderAccent = () => {
+    if (isRejected || isSuspended) return 'red';
+    return 'gold';
+  };
+
+  const getStatusTitle = () => {
+    if (isRejected) return 'Inscrição Recusada';
+    if (isSuspended) return 'Inscrição Suspensa';
+    return 'Aguardando Moderação';
+  };
+
+  const getBadgeVariant = () => {
+    if (isRejected) return 'rejected';
+    if (isSuspended) return 'suspended';
+    return 'pending';
+  };
+
+  const getBadgeText = () => {
+    if (isRejected) return 'Status: Recusado';
+    if (isSuspended) return 'Status: Suspenso pela Organização';
+    return 'Status: Em Análise pela Organização';
+  };
+
+  const getMessageText = () => {
+    if (isRejected) {
+      return `Motivo informado pela organização: ${
+        registration.rejection_reason || 'Dados inconsistentes ou foto inadequada. Entre em contato para regularizar.'
+      }`;
+    }
+    if (isSuspended) {
+      return `Motivo da suspensão: ${
+        registration.rejection_reason || 'Acesso suspenso temporariamente pela comissão organizadora.'
+      }`;
+    }
+    return `Sua inscrição para o evento "${event.title}" foi recebida com sucesso. Por motivos de segurança e integridade, os cards de confrontos e o chaveamento oficial são desbloqueados assim que a organização aprovar seus dados.`;
+  };
 
   return (
     <div className="animate-scale-in" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)', padding: 'var(--space-4) 0' }}>
-      <Card headerAccent={isRejected ? 'red' : 'gold'}>
+      <Card headerAccent={getHeaderAccent()}>
         <div style={{ textAlign: 'center', padding: 'var(--space-4) 0' }}>
           <div
             style={{
               width: '64px',
               height: '64px',
               borderRadius: '50%',
-              backgroundColor: isRejected ? 'var(--color-red-muted)' : 'var(--color-status-pending-bg)',
+              backgroundColor: isRejected || isSuspended ? 'var(--color-red-muted)' : 'var(--color-status-pending-bg)',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: isRejected ? 'var(--color-red-primary)' : 'var(--color-status-pending)',
+              color: isRejected || isSuspended ? 'var(--color-red-primary)' : 'var(--color-status-pending)',
               marginBottom: 'var(--space-4)',
             }}
           >
-            {isRejected ? <AlertCircle size={34} /> : <Clock size={34} />}
+            {isRejected ? <AlertCircle size={34} /> : isSuspended ? <ShieldAlert size={34} /> : <Clock size={34} />}
           </div>
 
           <h2 style={{ fontSize: 'var(--font-size-xl)', textTransform: 'uppercase', marginBottom: 'var(--space-2)' }}>
-            {isRejected ? 'Inscrição Recusada' : 'Aguardando Moderação'}
+            {getStatusTitle()}
           </h2>
 
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--space-4)' }}>
-            <Badge variant={isRejected ? 'rejected' : 'pending'}>
-              {isRejected ? 'Status: Recusado' : 'Status: Em Análise pela Organização'}
+            <Badge variant={getBadgeVariant()}>
+              {getBadgeText()}
             </Badge>
           </div>
 
           <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)', maxWidth: '420px', margin: '0 auto var(--space-6)', lineHeight: 1.5 }}>
-            {isRejected
-              ? `Motivo informado pela organização: ${registration.rejection_reason || 'Dados inconsistentes ou foto inadequada. Entre em contato para regularizar.'}`
-              : `Sua inscrição para o evento "${event.title}" foi recebida com sucesso. Por motivos de segurança e integridade, os cards de confrontos e o chaveamento oficial são desbloqueados assim que a organização aprovar seus dados.`}
+            {getMessageText()}
           </p>
 
           {/* Dados Declarados */}
@@ -83,10 +139,23 @@ export const PendingStatusView: React.FC<PendingStatusViewProps> = ({
 
           {/* Ações */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+            {onRefresh && (
+              <Button
+                variant="primary"
+                size="md"
+                fullWidth
+                isLoading={isChecking}
+                leftIcon={<RefreshCw size={18} className={isChecking ? 'animate-spin' : ''} />}
+                onClick={handleManualRefresh}
+              >
+                Verificar Aprovação Agora
+              </Button>
+            )}
+
             {hasValidWhatsApp && (
               <Button
                 variant="gold"
-                size="lg"
+                size="md"
                 fullWidth
                 leftIcon={<MessageCircle size={20} />}
                 onClick={() => window.open(event.whatsapp_group_url!, '_blank')}

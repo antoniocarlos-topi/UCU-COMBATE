@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 
 export const AthletePortal: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
   const { showToast } = useToast();
 
   const [selectedEventSlug, setSelectedEventSlug] = useState<string>('arena-inaugural');
@@ -46,9 +46,19 @@ export const AthletePortal: React.FC = () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const data = await getAthleteDashboardData(user?.id || 'demo-auth-id', slug);
+      const userIdentifier = user?.id || profile?.auth_user_id || profile?.id || '';
+      const nickname = profile?.nickname || (user?.user_metadata?.nickname as string | undefined);
+      const profileIdHint = profile?.id;
+
+      const data = await getAthleteDashboardData(
+        userIdentifier || 'demo-auth-id',
+        slug,
+        nickname,
+        profileIdHint
+      );
       setDashboardData(data);
     } catch (err: any) {
+      console.error('[AthletePortal] Erro ao carregar dados:', err);
       setErrorMessage('Não foi possível carregar as informações do evento.');
     } finally {
       setIsLoading(false);
@@ -66,7 +76,7 @@ export const AthletePortal: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [selectedEventSlug, user]);
+  }, [selectedEventSlug, user, profile]);
 
   const handleEventChange = (newSlug: string) => {
     setSelectedEventSlug(newSlug);
@@ -87,13 +97,14 @@ export const AthletePortal: React.FC = () => {
     );
   }
 
-  // Se o participante estiver PENDENTE ou RECUSADO no evento selecionado:
+  // Se o participante estiver PENDENTE, SUSPENSO ou RECUSADO no evento selecionado:
   if (dashboardData.currentRegistration.status !== 'approved') {
     return (
       <PendingStatusView
         registration={dashboardData.currentRegistration}
         event={dashboardData.selectedEvent}
         onLogout={logout}
+        onRefresh={() => loadData(selectedEventSlug)}
       />
     );
   }

@@ -119,25 +119,61 @@ export function calculateCareerStats(
  */
 export async function getAthleteDashboardData(
   authUserId: string,
-  eventSlug: string = 'arena-inaugural'
+  eventSlug: string = 'arena-inaugural',
+  userNickname?: string,
+  profileIdHint?: string
 ): Promise<AthleteEventDashboardData> {
   const isSupabaseConfigured = Boolean(
     import.meta.env.VITE_SUPABASE_URL &&
     !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
   );
 
-  // Se Supabase estiver conectado e configurado, busca dados reais
+  // Se Supabase estiver conectado e configurado, busca dados reais com máxima resiliência
   if (isSupabaseConfigured) {
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('auth_user_id', authUserId)
-        .maybeSingle();
+      // 1. Localizar o perfil do atleta por todos os identificadores possíveis
+      let profile: any = null;
+
+      // A. Busca direta por ID do perfil (prof-xxx) se fornecido
+      if (profileIdHint) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', profileIdHint)
+          .maybeSingle();
+        if (data) profile = data;
+      }
+
+      // B. Busca por auth_user_id ou ID do perfil usando authUserId
+      if (!profile && authUserId && authUserId !== 'demo-auth-id') {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`)
+          .maybeSingle();
+        if (data) profile = data;
+      }
+
+      // C. Busca por apelido (case-insensitive) se fornecido
+      const nickToSearch = userNickname || (authUserId && !authUserId.includes('-') ? authUserId : undefined);
+      if (!profile && nickToSearch) {
+        const cleanNick = nickToSearch.trim().toLowerCase();
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`nickname_normalized.eq.${cleanNick},nickname.ilike.${nickToSearch.trim()}`)
+          .maybeSingle();
+        if (data) profile = data;
+      }
 
       if (profile) {
+        // 2. Buscar inscrições associadas ao perfil no Supabase
+        const regFilter = profile.auth_user_id
+          ? `profile_id.eq.${profile.id},profile_id.eq.${profile.auth_user_id}`
+          : `profile_id.eq.${profile.id}`;
+
         const [regRes, evtRes, catRes] = await Promise.all([
-          supabase.from('event_registrations').select('*').eq('profile_id', profile.id),
+          supabase.from('event_registrations').select('*').or(regFilter),
           supabase.from('events').select('*'),
           supabase.from('weight_categories').select('*'),
         ]);
@@ -147,15 +183,68 @@ export async function getAthleteDashboardData(
 
         const registrations = (regRes.data || []).map((r: any) => ({
           ...r,
-          events: evtMap.get(r.event_id),
+          events: evtMap.get(r.event_id) || DEFAULT_INAUGURAL_EVENT,
           weight_categories: catMap.get(r.weight_category_id),
         }));
 
-        const currentReg = registrations.find(
-          (r: any) => r.events?.slug === eventSlug
+        let currentReg = registrations.find(
+          (r: any) => r.events?.slug === eventSlug || r.event_id === eventSlug
         );
 
+        if (!currentReg && registrations.length > 0) {
+          currentReg = registrations[0];
+        }
+
         if (currentReg) {
+          // Sincronizar o status real da nuvem de volta para o unifiedStore local
+          try {
+            const store = getUnifiedStore();
+            let storeUpdated = false;
+
+            const localRegIndex = store.registrations.findIndex(
+              (r) =>
+                r.id === currentReg.id ||
+                r.profile_id === profile.id ||
+                r.profile?.auth_user_id === profile.auth_user_id
+            );
+
+            if (localRegIndex >= 0) {
+              store.registrations[localRegIndex].status = currentReg.status;
+              store.registrations[localRegIndex].rejection_reason = currentReg.rejection_reason || null;
+              store.registrations[localRegIndex].verified_weight = currentReg.verified_weight;
+              store.registrations[localRegIndex].reviewed_at = currentReg.reviewed_at;
+              storeUpdated = true;
+            }
+
+            // Garantir que o usuário também esteja no store local
+            const localUserIndex = store.users.findIndex(
+              (u) =>
+                u.profileId === profile.id ||
+                u.id === profile.auth_user_id ||
+                u.nicknameNormalized === profile.nickname_normalized
+            );
+            if (localUserIndex === -1) {
+              store.users.push({
+                id: profile.auth_user_id || profile.id,
+                nickname: profile.nickname,
+                nicknameNormalized: profile.nickname_normalized || profile.nickname.toLowerCase(),
+                password: 'password',
+                fullName: profile.full_name,
+                recoveryEmail: profile.recovery_email,
+                isAdmin: false,
+                profileId: profile.id,
+                createdAt: profile.created_at || new Date().toISOString(),
+              });
+              storeUpdated = true;
+            }
+
+            if (storeUpdated) {
+              saveUnifiedStore(store);
+            }
+          } catch (syncErr) {
+            console.warn('[AthleteService] Aviso ao sincronizar com store local:', syncErr);
+          }
+
           const { data: rawMatches } = await supabase
             .from('matches')
             .select('*')
@@ -197,11 +286,31 @@ export async function getAthleteDashboardData(
 
           const stats = calculateCareerStats(profile.id, eventMatches);
 
+          const formattedEventData: EventInvitationData = {
+            id: currentReg.events?.id || DEFAULT_INAUGURAL_EVENT.id,
+            slug: currentReg.events?.slug || DEFAULT_INAUGURAL_EVENT.slug,
+            title: currentReg.events?.title || DEFAULT_INAUGURAL_EVENT.title,
+            headline: 'Comunicado Oficial U.C.U',
+            invitation_text: currentReg.events?.description || DEFAULT_INAUGURAL_EVENT.invitation_text,
+            signatories: DEFAULT_INAUGURAL_EVENT.signatories,
+            location_name: currentReg.events?.location_name || DEFAULT_INAUGURAL_EVENT.location_name,
+            event_date_text: currentReg.events?.event_date
+              ? new Date(currentReg.events.event_date).toLocaleDateString('pt-BR')
+              : DEFAULT_INAUGURAL_EVENT.event_date_text,
+            whatsapp_group_url: currentReg.events?.whatsapp_group_url || DEFAULT_INAUGURAL_EVENT.whatsapp_group_url,
+            requires_invite: Boolean(currentReg.events?.requires_invite),
+            access_code: currentReg.events?.access_code,
+            min_weight: Number(currentReg.events?.min_weight) || 50.0,
+            max_weight: Number(currentReg.events?.max_weight) || 90.0,
+            status: currentReg.events?.status || 'open_for_registration',
+            categories: DEFAULT_INAUGURAL_EVENT.categories,
+          };
+
           return {
             athleteProfile: profile as UserProfile,
             currentRegistration: currentReg as EventRegistration,
             enrolledEvents: (registrations || []).map((r: any) => r.events),
-            selectedEvent: currentReg.events,
+            selectedEvent: formattedEventData,
             nextMatch,
             eventMatches,
             announcements: (announcementsData || []).map((a: any) => ({
@@ -223,7 +332,7 @@ export async function getAthleteDashboardData(
         }
       }
     } catch (err) {
-      console.warn('[AthleteService] Falha na sincronização remota. Usando dados locais resilientes.');
+      console.warn('[AthleteService] Falha na sincronização remota. Usando dados locais resilientes:', err);
     }
   }
 
