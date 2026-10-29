@@ -14,7 +14,7 @@ export interface ImageProcessingResult {
 }
 
 const MAX_OUTPUT_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB (Limite estrito do Supabase Storage)
-const TARGET_DIMENSION = 800; // 800x800px máximo para avatares de combate
+const TARGET_DIMENSION = 400; // 400x400px máximo para avatares de perfil (otimizado para banco de dados)
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 /**
@@ -114,33 +114,25 @@ export async function processAndCompressAthleteAvatar(
             const compressedFile = new File([blob], fileName, { type: 'image/webp' });
             const previewUrl = URL.createObjectURL(blob);
 
-            // Gerar data URL base64 para persistência no banco de dados
-            const dataUrlReader = new FileReader();
-            dataUrlReader.onloadend = () => {
-              resolve({
-                file: compressedFile,
-                previewUrl,
-                dataUrl: (dataUrlReader.result as string) || '',
-                originalSizeKb: Math.round(file.size / 1024),
-                compressedSizeKb: Math.round(blob.size / 1024),
-                width,
-                height,
-              });
-            };
-            dataUrlReader.onerror = () => {
-              // Fallback: usar canvas.toDataURL se FileReader falhar
-              const fallbackDataUrl = canvas.toDataURL('image/jpeg', 0.75);
-              resolve({
-                file: compressedFile,
-                previewUrl,
-                dataUrl: fallbackDataUrl,
-                originalSizeKb: Math.round(file.size / 1024),
-                compressedSizeKb: Math.round(blob.size / 1024),
-                width,
-                height,
-              });
-            };
-            dataUrlReader.readAsDataURL(blob);
+            // Gerar data URL base64 JPEG para persistência no banco de dados (menor que WebP para base64)
+            let dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+            // Se ainda muito grande (>100KB), recomprimir
+            if (dataUrl.length > 100000) {
+              dataUrl = canvas.toDataURL('image/jpeg', 0.5);
+            }
+            if (dataUrl.length > 200000) {
+              dataUrl = canvas.toDataURL('image/jpeg', 0.3);
+            }
+
+            resolve({
+              file: compressedFile,
+              previewUrl,
+              dataUrl,
+              originalSizeKb: Math.round(file.size / 1024),
+              compressedSizeKb: Math.round(blob.size / 1024),
+              width,
+              height,
+            });
           },
           'image/webp',
           0.85

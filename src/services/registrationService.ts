@@ -59,7 +59,7 @@ function fileToDataUrl(file: File): Promise<string> {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 400; // 400px é a dimensão ideal para fotos de perfil
+          const maxDim = 400;
 
           if (width > maxDim || height > maxDim) {
             if (width > height) {
@@ -75,8 +75,23 @@ function fileToDataUrl(file: File): Promise<string> {
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           if (ctx) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
+
+            // Tentar JPEG com qualidade 0.75
+            let result = canvas.toDataURL('image/jpeg', 0.75);
+
+            // Se ainda muito grande (>100KB base64), recomprimir
+            if (result.length > 100000) {
+              result = canvas.toDataURL('image/jpeg', 0.5);
+            }
+            // Limite absoluto: se ainda > 200KB, comprimir mais
+            if (result.length > 200000) {
+              result = canvas.toDataURL('image/jpeg', 0.3);
+            }
+
+            resolve(result);
             return;
           }
         } catch {

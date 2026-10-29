@@ -653,3 +653,40 @@ export function updateAthleteAvatarInStore(profileId: string, newAvatarUrl: stri
   }
   return updated;
 }
+
+
+/**
+ * Persiste o avatar atualizado do atleta no Supabase (nuvem).
+ * Chamada em segundo plano após salvar no store local.
+ */
+export async function updateAthleteAvatarInSupabase(profileId: string, avatarDataUrl: string): Promise<boolean> {
+  try {
+    const { supabase } = await import('../lib/supabaseClient');
+
+    const isSupabaseConfigured = Boolean(
+      import.meta.env.VITE_SUPABASE_URL &&
+      !import.meta.env.VITE_SUPABASE_URL.includes('placeholder')
+    );
+
+    if (!isSupabaseConfigured) return false;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        avatar_url: avatarDataUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .or(`id.eq.${profileId},auth_user_id.eq.${profileId}`);
+
+    if (error) {
+      console.warn('[storeSync] Erro ao atualizar avatar no Supabase:', error.message);
+      return false;
+    }
+
+    console.info('[storeSync] Avatar atualizado no Supabase com sucesso para:', profileId);
+    return true;
+  } catch (err) {
+    console.warn('[storeSync] Exceção ao atualizar avatar no Supabase:', err);
+    return false;
+  }
+}

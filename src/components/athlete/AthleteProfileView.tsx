@@ -6,8 +6,9 @@ import { Loader } from '../common/Loader';
 import { UserProfile, EventRegistration, MatchFight } from '../../types/app.types';
 import { AthleteCareerStats } from '../../services/athleteService';
 import { useToast } from '../../contexts/ToastContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { processAndCompressAthleteAvatar } from '../../utils/imageCompressor';
-import { updateAthleteAvatarInStore } from '../../services/storeSync';
+import { updateAthleteAvatarInStore, updateAthleteAvatarInSupabase } from '../../services/storeSync';
 import { Scale, ShieldCheck, Video, Lock, Camera } from 'lucide-react';
 
 export interface AthleteProfileViewProps {
@@ -26,6 +27,7 @@ export const AthleteProfileView: React.FC<AthleteProfileViewProps> = ({
   onProfileUpdated,
 }) => {
   const { showToast } = useToast();
+  const { refreshProfile } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUpdatingAvatar, setIsUpdatingAvatar] = useState(false);
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(profile.avatar_url || null);
@@ -37,10 +39,20 @@ export const AthleteProfileView: React.FC<AthleteProfileViewProps> = ({
     try {
       setIsUpdatingAvatar(true);
       const result = await processAndCompressAthleteAvatar(file);
-      setCurrentAvatarUrl(result.previewUrl);
 
-      // Persistir no store unificado
-      updateAthleteAvatarInStore(profile.id, result.previewUrl);
+      // Usar dataUrl (base64) para persistência, previewUrl apenas para exibição imediata
+      const persistentUrl = result.dataUrl || result.previewUrl;
+      setCurrentAvatarUrl(persistentUrl);
+
+      // Persistir no store unificado local
+      updateAthleteAvatarInStore(profile.id, persistentUrl);
+
+      // Persistir no Supabase (nuvem) em segundo plano
+      updateAthleteAvatarInSupabase(profile.id, persistentUrl).catch((err) =>
+        console.warn('[AthleteProfile] Aviso ao salvar foto na nuvem:', err)
+      );
+
+      refreshProfile().catch(() => {});
       showToast('Foto do perfil atualizada com sucesso!', 'success');
 
       if (onProfileUpdated) {

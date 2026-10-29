@@ -55,6 +55,14 @@ export interface AthleteEventDashboardData {
 /**
  * Calcula estatísticas esportivas a partir de uma lista de confrontos finalizados
  */
+
+function withTimeout<T>(promiseLike: PromiseLike<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    Promise.resolve(promiseLike),
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export function calculateCareerStats(
   profileId: string,
   matches: MatchFight[]
@@ -136,21 +144,21 @@ export async function getAthleteDashboardData(
 
       // A. Busca direta por ID do perfil (prof-xxx) se fornecido
       if (profileIdHint) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', profileIdHint)
-          .maybeSingle();
+        const { data } = await withTimeout(
+          supabase.from('profiles').select('id, auth_user_id, full_name, nickname, nickname_normalized, recovery_email, phone, birth_date, is_minor, guardian_name, guardian_relationship, guardian_phone, guardian_document, image_consent, terms_consent, avatar_url, created_at, updated_at').eq('id', profileIdHint).maybeSingle(),
+          2500,
+          { data: null } as any
+        );
         if (data) profile = data;
       }
 
       // B. Busca por auth_user_id ou ID do perfil usando authUserId
       if (!profile && authUserId && authUserId !== 'demo-auth-id') {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`)
-          .maybeSingle();
+        const { data } = await withTimeout(
+          supabase.from('profiles').select('id, auth_user_id, full_name, nickname, nickname_normalized, recovery_email, phone, birth_date, is_minor, guardian_name, guardian_relationship, guardian_phone, guardian_document, image_consent, terms_consent, avatar_url, created_at, updated_at').or(`auth_user_id.eq.${authUserId},id.eq.${authUserId}`).maybeSingle(),
+          2500,
+          { data: null } as any
+        );
         if (data) profile = data;
       }
 
@@ -158,11 +166,11 @@ export async function getAthleteDashboardData(
       const nickToSearch = userNickname || (authUserId && !authUserId.includes('-') ? authUserId : undefined);
       if (!profile && nickToSearch) {
         const cleanNick = nickToSearch.trim().toLowerCase();
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .or(`nickname_normalized.eq.${cleanNick},nickname.ilike.${nickToSearch.trim()}`)
-          .maybeSingle();
+        const { data } = await withTimeout(
+          supabase.from('profiles').select('id, auth_user_id, full_name, nickname, nickname_normalized, recovery_email, phone, birth_date, is_minor, guardian_name, guardian_relationship, guardian_phone, guardian_document, image_consent, terms_consent, avatar_url, created_at, updated_at').or(`nickname_normalized.eq.${cleanNick},nickname.ilike.${nickToSearch.trim()}`).maybeSingle(),
+          2500,
+          { data: null } as any
+        );
         if (data) profile = data;
       }
 
@@ -172,11 +180,15 @@ export async function getAthleteDashboardData(
           ? `profile_id.eq.${profile.id},profile_id.eq.${profile.auth_user_id}`
           : `profile_id.eq.${profile.id}`;
 
-        const [regRes, evtRes, catRes] = await Promise.all([
-          supabase.from('event_registrations').select('*').or(regFilter),
-          supabase.from('events').select('*'),
-          supabase.from('weight_categories').select('*'),
-        ]);
+        const [regRes, evtRes, catRes] = await withTimeout(
+          Promise.all([
+            supabase.from('event_registrations').select('*').or(regFilter),
+            supabase.from('events').select('*'),
+            supabase.from('weight_categories').select('*'),
+          ]),
+          2500,
+          [{ data: null }, { data: null }, { data: null }] as any
+        );
 
         const evtMap = new Map((evtRes.data || []).map((e: any) => [e.id, e]));
         const catMap = new Map((catRes.data || []).map((c: any) => [c.id, c]));
@@ -262,45 +274,55 @@ export async function getAthleteDashboardData(
           }
 
           // Consultas paralelas ultra-rápidas para o evento
-          const [rawMatchesRes, announcementsRes, mediaRes] = await Promise.all([
-            supabase
-              .from('matches')
-              .select('*')
-              .eq('event_id', currentReg.event_id),
-            supabase
-              .from('event_announcements')
-              .select('*')
-              .eq('event_id', currentReg.event_id)
-              .order('created_at', { ascending: false }),
-            supabase
-              .from('media_items')
-              .select('*')
-              .eq('event_id', currentReg.event_id),
-          ]);
+          const [rawMatchesRes, announcementsRes, mediaRes] = await withTimeout(
+            Promise.all([
+              supabase.from('matches').select('*').eq('event_id', currentReg.event_id),
+              supabase.from('event_announcements').select('*').eq('event_id', currentReg.event_id).order('created_at', { ascending: false }),
+              supabase.from('media_items').select('*').eq('event_id', currentReg.event_id),
+            ]),
+            2500,
+            [{ data: null }, { data: null }, { data: null }] as any
+          );
 
           const rawMatches = rawMatchesRes.data || [];
           const announcementsData = announcementsRes.data || [];
           const mediaData = mediaRes.data || [];
 
-          // Carrega apenas resumo de perfis necessários para confrontos (sem baixar avatares pesados)
-          let profLookup = new Map<string, any>();
+          // Carrega perfis dos lutadores com avatar_url para visualização completa dos confrontos
+          let fighterLookup = new Map<string, any>();
           if (rawMatches.length > 0) {
-            const { data: fighterProfiles } = await supabase
-              .from('profiles')
-              .select('id, full_name, nickname, auth_user_id')
-              .limit(100);
-            profLookup = new Map((fighterProfiles || []).map((p: any) => [p.id, p]));
+            const [fightersRegRes, fightersProfRes] = await withTimeout(
+              Promise.all([
+                supabase.from('event_registrations').select('id, profile_id').eq('event_id', currentReg.event_id),
+                supabase.from('profiles').select('id, full_name, nickname, auth_user_id, avatar_url').limit(100),
+              ]),
+              2000,
+              [{ data: null }, { data: null }] as any
+            );
+
+            const profMap = new Map((fightersProfRes.data || []).map((p: any) => [p.id, p]));
+            for (const r of fightersRegRes.data || []) {
+              const p = profMap.get(r.profile_id);
+              if (p) {
+                fighterLookup.set(r.id, p);
+              }
+            }
+            for (const p of fightersProfRes.data || []) {
+              if (!fighterLookup.has(p.id)) {
+                fighterLookup.set(p.id, p);
+              }
+            }
           }
 
           const eventMatches: MatchFight[] = rawMatches.map((m: any) => ({
             ...m,
             fighter1: {
               id: m.fighter1_registration_id,
-              profile: profLookup.get(m.fighter1_registration_id),
+              profile: fighterLookup.get(m.fighter1_registration_id) || null,
             },
             fighter2: {
               id: m.fighter2_registration_id,
-              profile: profLookup.get(m.fighter2_registration_id),
+              profile: fighterLookup.get(m.fighter2_registration_id) || null,
             },
           })) as any;
 
