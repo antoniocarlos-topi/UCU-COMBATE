@@ -761,14 +761,16 @@ export async function deleteAthleteRegistration(
   }
 
   // 2. Deletes diretos como fallback
+  const regToDelete = adminStore.registrations.find((r) => r.id === registrationId);
+  const profileId = regToDelete?.profile_id || registrationId;
+  const authUserId = regToDelete?.profile?.auth_user_id;
+  const nickNorm = regToDelete?.profile?.nickname ? regToDelete.profile.nickname.trim().toLowerCase() : undefined;
+
   try {
     await supabase
       .from('matches')
       .delete()
       .or(`fighter1_registration_id.eq.${registrationId},fighter2_registration_id.eq.${registrationId}`);
-
-    const reg = adminStore.registrations.find((r) => r.id === registrationId);
-    const profileId = reg?.profile_id || registrationId;
 
     await supabase.from('event_registrations').delete().eq('id', registrationId);
     await supabase.from('profiles').delete().eq('id', profileId);
@@ -781,6 +783,21 @@ export async function deleteAthleteRegistration(
   adminStore.matches = adminStore.matches.filter(
     (m) => m.fighter1_registration_id !== registrationId && m.fighter2_registration_id !== registrationId
   );
+
+  // 4. Limpa usuário correspondente do store unificado para impedir login
+  try {
+    const unified = getUnifiedStore();
+    unified.users = unified.users.filter(
+      (u) =>
+        u.profileId !== profileId &&
+        u.id !== authUserId &&
+        u.id !== registrationId &&
+        (!nickNorm || u.nicknameNormalized !== nickNorm)
+    );
+    saveUnifiedStore(unified, { silent: true });
+  } catch (cleanErr) {
+    console.warn('[AdminService] Aviso ao limpar usuário excluído:', cleanErr);
+  }
 
   logAuditAction(
     null,

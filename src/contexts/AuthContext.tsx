@@ -113,6 +113,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         if (reg?.profile) {
           setProfile(reg.profile);
+        } else {
+          // Se não encontrou no store local deste dispositivo, recupera da nuvem
+          try {
+            const { data: cloudProfile } = await supabase
+              .from('profiles')
+              .select('*')
+              .or(`auth_user_id.eq.${savedUserId},id.eq.${storedUser.profileId || savedUserId}`)
+              .maybeSingle();
+
+            if (cloudProfile) {
+              setProfile(cloudProfile as UserProfile);
+            }
+          } catch {}
         }
       } else {
         // Tentar restaurar da nuvem (Supabase) para dispositivos secundários
@@ -165,14 +178,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, currentSession) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
 
       if (currentSession?.user) {
-        fetchProfileAndRole(currentSession.user.id);
+        await fetchProfileAndRole(currentSession.user.id);
       } else {
-        restoreLocalSession();
+        await restoreLocalSession();
       }
       setIsLoading(false);
     });

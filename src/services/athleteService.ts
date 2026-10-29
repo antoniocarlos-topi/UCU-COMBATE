@@ -196,7 +196,7 @@ export async function getAthleteDashboardData(
         }
 
         if (currentReg) {
-          // Sincronizar o status real da nuvem de volta para o unifiedStore local
+          // Sincronizar o status real da nuvem de volta para o unifiedStore local de forma silenciosa (sem loops)
           try {
             const store = getUnifiedStore();
             let storeUpdated = false;
@@ -209,10 +209,25 @@ export async function getAthleteDashboardData(
             );
 
             if (localRegIndex >= 0) {
-              store.registrations[localRegIndex].status = currentReg.status;
-              store.registrations[localRegIndex].rejection_reason = currentReg.rejection_reason || null;
-              store.registrations[localRegIndex].verified_weight = currentReg.verified_weight;
-              store.registrations[localRegIndex].reviewed_at = currentReg.reviewed_at;
+              const localReg = store.registrations[localRegIndex];
+              if (
+                localReg.status !== currentReg.status ||
+                localReg.rejection_reason !== (currentReg.rejection_reason || null) ||
+                localReg.verified_weight !== currentReg.verified_weight ||
+                localReg.reviewed_at !== currentReg.reviewed_at
+              ) {
+                localReg.status = currentReg.status;
+                localReg.rejection_reason = currentReg.rejection_reason || null;
+                localReg.verified_weight = currentReg.verified_weight;
+                localReg.reviewed_at = currentReg.reviewed_at;
+                storeUpdated = true;
+              }
+            } else {
+              // Se não existia no store local deste dispositivo, armazena para cache offline
+              store.registrations.push({
+                ...currentReg,
+                profile: profile as UserProfile,
+              });
               storeUpdated = true;
             }
 
@@ -239,21 +254,45 @@ export async function getAthleteDashboardData(
             }
 
             if (storeUpdated) {
-              saveUnifiedStore(store);
+              // Salva em silêncio para NÃO disparar CustomEvent e evitar loop infinito de re-render
+              saveUnifiedStore(store, { silent: true });
             }
           } catch (syncErr) {
             console.warn('[AthleteService] Aviso ao sincronizar com store local:', syncErr);
           }
 
-          const { data: rawMatches } = await supabase
-            .from('matches')
-            .select('*')
-            .eq('event_id', currentReg.event_id);
+          // Consultas paralelas ultra-rápidas para o evento
+          const [rawMatchesRes, announcementsRes, mediaRes] = await Promise.all([
+            supabase
+              .from('matches')
+              .select('*')
+              .eq('event_id', currentReg.event_id),
+            supabase
+              .from('event_announcements')
+              .select('*')
+              .eq('event_id', currentReg.event_id)
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('media_items')
+              .select('*')
+              .eq('event_id', currentReg.event_id),
+          ]);
 
-          const { data: allProfiles } = await supabase.from('profiles').select('*');
-          const profLookup = new Map((allProfiles || []).map((p: any) => [p.id, p]));
+          const rawMatches = rawMatchesRes.data || [];
+          const announcementsData = announcementsRes.data || [];
+          const mediaData = mediaRes.data || [];
 
-          const eventMatches: MatchFight[] = (rawMatches || []).map((m: any) => ({
+          // Carrega apenas resumo de perfis necessários para confrontos (sem baixar avatares pesados)
+          let profLookup = new Map<string, any>();
+          if (rawMatches.length > 0) {
+            const { data: fighterProfiles } = await supabase
+              .from('profiles')
+              .select('id, full_name, nickname, auth_user_id')
+              .limit(100);
+            profLookup = new Map((fighterProfiles || []).map((p: any) => [p.id, p]));
+          }
+
+          const eventMatches: MatchFight[] = rawMatches.map((m: any) => ({
             ...m,
             fighter1: {
               id: m.fighter1_registration_id,
@@ -264,17 +303,6 @@ export async function getAthleteDashboardData(
               profile: profLookup.get(m.fighter2_registration_id),
             },
           })) as any;
-
-          const { data: announcementsData } = await supabase
-            .from('event_announcements')
-            .select('*')
-            .eq('event_id', currentReg.event_id)
-            .order('created_at', { ascending: false });
-
-          const { data: mediaData } = await supabase
-            .from('media_items')
-            .select('*')
-            .eq('event_id', currentReg.event_id);
 
           const nextMatch =
             eventMatches.find(
