@@ -325,6 +325,30 @@ export const adminStore: AdminDataStore = {
   auditLogs: [...initialAuditLogs],
 };
 
+
+const DELETED_REGS_STORAGE_KEY = 'ucu_deleted_registrations_v1';
+
+export function getDeletedRegistrationIds(): Set<string> {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(DELETED_REGS_STORAGE_KEY);
+      if (raw) return new Set(JSON.parse(raw));
+    }
+  } catch {}
+  return new Set();
+}
+
+export function addDeletedRegistrationId(id: string, profileId?: string) {
+  try {
+    if (typeof window !== 'undefined') {
+      const set = getDeletedRegistrationIds();
+      if (id) set.add(id);
+      if (profileId) set.add(profileId);
+      localStorage.setItem(DELETED_REGS_STORAGE_KEY, JSON.stringify(Array.from(set)));
+    }
+  } catch {}
+}
+
 export function syncAdminStoreFromUnified(): void {
   try {
     const unified = getUnifiedStore();
@@ -341,16 +365,19 @@ export function syncAdminStoreFromUnified(): void {
 
 export function syncAdminStoreToUnified(): void {
   try {
+    const deletedIds = getDeletedRegistrationIds();
     const unified = getUnifiedStore();
     unified.events = [...adminStore.events];
-    unified.registrations = [...adminStore.registrations];
+    unified.registrations = adminStore.registrations.filter(
+      (r) => !deletedIds.has(r.id) && (!r.profile_id || !deletedIds.has(r.profile_id))
+    );
     unified.matches = [...adminStore.matches];
     unified.announcements = [...adminStore.announcements];
     unified.mediaItems = [...adminStore.mediaItems];
     unified.auditLogs = [...adminStore.auditLogs];
 
     // Popular unified.users para qualquer perfil da nuvem que ainda não esteja no store local
-    for (const reg of adminStore.registrations) {
+    for (const reg of unified.registrations) {
       if (reg.profile && reg.profile.nickname) {
         const cleanNick = reg.profile.nickname.trim().toLowerCase();
         const existing = unified.users.find(
@@ -375,7 +402,7 @@ export function syncAdminStoreToUnified(): void {
       }
     }
 
-    saveUnifiedStore(unified);
+    saveUnifiedStore(unified, { silent: true });
   } catch (err) {
     console.error('[AdminService] Falha ao sincronizar para o UnifiedStore:', err);
   }
@@ -429,7 +456,7 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   try {
     const cloudFetch = Promise.all([
       supabase.from('event_registrations').select('*'),
-      supabase.from('profiles').select('*'),
+      supabase.from('profiles').select('id, auth_user_id, full_name, nickname, nickname_normalized, recovery_email, phone, birth_date, is_minor, guardian_name, guardian_relationship, guardian_phone, guardian_document, image_consent, terms_consent, avatar_url, created_at, updated_at'),
       supabase.from('weight_categories').select('*'),
       supabase.from('matches').select('*'),
     ]);
@@ -500,14 +527,27 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
         };
       });
 
-      // Mesclar registros da nuvem preservando integridade
+      // Mesclar registros da nuvem preservando integridade e filtrando excluídos
+      const deletedIds = getDeletedRegistrationIds();
       const cloudMap = new Map<string, EventRegistration>();
       for (const reg of mappedCloudRegs) {
+        if (deletedIds.has(reg.id) || (reg.profile_id && deletedIds.has(reg.profile_id))) {
+          continue;
+        }
+        // Se já está aprovado localmente pelo admin, preserva status aprovado
+        const local = adminStore.registrations.find((r) => r.id === reg.id || r.profile_id === reg.profile_id);
+        if (local && local.status === 'approved' && reg.status !== 'approved') {
+          reg.status = 'approved';
+          reg.rejection_reason = null;
+        }
         cloudMap.set(reg.id, reg);
       }
 
       // Adiciona registros locais que ainda não subiram
       for (const localReg of adminStore.registrations) {
+        if (deletedIds.has(localReg.id) || (localReg.profile_id && deletedIds.has(localReg.profile_id))) {
+          continue;
+        }
         if (!cloudMap.has(localReg.id)) {
           cloudMap.set(localReg.id, localReg);
         }
@@ -608,27 +648,25 @@ export async function approveAthleteRegistration(
 ): Promise<{ success: boolean; error?: string }> {
   const nowIso = new Date().toISOString();
 
-  // 1. Invocar RPC com privilégios de segurança no Supabase (garantia multi-dispositivo)
+  // 1. Atualizar diretamente na nuvem com timeout estrito de 3 segundos
   try {
-    const { error: rpcErr } = await supabase.rpc('admin_approve_registration', {
-      p_reg_id: registrationId,
-      p_admin_name: adminNickname,
-    });
-    if (rpcErr) {
-      console.warn('[AdminService] RPC admin_approve_registration aviso:', rpcErr);
-    }
-  } catch (rpcEx) {
-    console.warn('[AdminService] RPC admin_approve_registration exceção:', rpcEx);
-  }
+    const cloudUpdate = Promise.all([
+      supabase
+        .from('event_registrations')
+        .update({ status: 'approved', rejection_reason: null, reviewed_at: nowIso })
+        .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`),
+      supabase.rpc('admin_approve_registration', {
+        p_reg_id: registrationId,
+        p_admin_name: adminNickname,
+      }),
+    ]);
 
-  // 2. Atualizar diretamente na tabela event_registrations na nuvem
-  try {
-    await supabase
-      .from('event_registrations')
-      .update({ status: 'approved', rejection_reason: null, reviewed_at: nowIso })
-      .or(`id.eq.${registrationId},profile_id.eq.${registrationId}`);
+    await Promise.race([
+      cloudUpdate,
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
   } catch (err) {
-    console.warn('[AdminService] Falha ao aprovar no Supabase via update:', err);
+    console.warn('[AdminService] Falha ao aprovar no Supabase:', err);
   }
 
   // 3. Atualizar no store de memória administrativa
@@ -758,40 +796,49 @@ export async function deleteAthleteRegistration(
   registrationId: string,
   adminNickname: string = 'Admin Principal'
 ): Promise<{ success: boolean; error?: string }> {
-  // 1. Tenta RPC
-  try {
-    await supabase.rpc('admin_delete_registration', { p_reg_id: registrationId });
-  } catch (rpcEx) {
-    console.warn('[AdminService] RPC admin_delete_registration:', rpcEx);
-  }
-
-  // 2. Deletes diretos como fallback
-  const regToDelete = adminStore.registrations.find((r) => r.id === registrationId);
-  const profileId = regToDelete?.profile_id || registrationId;
+  const unified = getUnifiedStore();
+  const regToDelete = adminStore.registrations.find((r) => r.id === registrationId) ||
+                      unified.registrations.find((r) => r.id === registrationId);
+  const profileId = regToDelete?.profile_id || regToDelete?.profile?.id || registrationId;
   const authUserId = regToDelete?.profile?.auth_user_id;
   const nickNorm = regToDelete?.profile?.nickname ? regToDelete.profile.nickname.trim().toLowerCase() : undefined;
 
-  try {
-    await supabase
-      .from('matches')
-      .delete()
-      .or(`fighter1_registration_id.eq.${registrationId},fighter2_registration_id.eq.${registrationId}`);
+  // 1. Marca imediatamente no blacklist local para garantia absoluta contra retorno
+  addDeletedRegistrationId(registrationId, profileId);
 
-    await supabase.from('event_registrations').delete().eq('id', registrationId);
-    await supabase.from('profiles').delete().eq('id', profileId);
+  // 2. Executa exclusão no Supabase com timeout resiliente de 2.5s (sem travar a interface)
+  try {
+    const cloudDeletes = Promise.all([
+      supabase.from('matches').delete().or(`fighter1_registration_id.eq.${registrationId},fighter2_registration_id.eq.${registrationId}`),
+      supabase.from('event_registrations').delete().or(`id.eq.${registrationId},profile_id.eq.${registrationId},profile_id.eq.${profileId}`),
+      supabase.from('profiles').delete().or(`id.eq.${profileId},id.eq.${registrationId}`),
+      supabase.rpc('admin_delete_registration', { p_reg_id: registrationId }),
+    ]);
+
+    await Promise.race([
+      cloudDeletes,
+      new Promise((resolve) => setTimeout(resolve, 2500)),
+    ]);
   } catch (err) {
     console.warn('[AdminService] Falha ao excluir no Supabase:', err);
   }
 
-  // 3. Remove do store local
-  adminStore.registrations = adminStore.registrations.filter((r) => r.id !== registrationId);
+  // 3. Remove imediatamente do store em memória do admin
+  adminStore.registrations = adminStore.registrations.filter(
+    (r) => r.id !== registrationId && r.profile_id !== profileId && (!profileId || r.profile?.id !== profileId)
+  );
   adminStore.matches = adminStore.matches.filter(
     (m) => m.fighter1_registration_id !== registrationId && m.fighter2_registration_id !== registrationId
   );
 
-  // 4. Limpa usuário correspondente do store unificado para impedir login
+  // 4. Limpa usuário e inscrição correspondentes do store unificado
   try {
-    const unified = getUnifiedStore();
+    unified.registrations = unified.registrations.filter(
+      (r) => r.id !== registrationId && r.profile_id !== profileId && (!profileId || r.profile?.id !== profileId)
+    );
+    unified.matches = unified.matches.filter(
+      (m) => m.fighter1_registration_id !== registrationId && m.fighter2_registration_id !== registrationId
+    );
     unified.users = unified.users.filter(
       (u) =>
         u.profileId !== profileId &&

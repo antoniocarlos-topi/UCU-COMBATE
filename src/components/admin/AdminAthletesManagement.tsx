@@ -117,14 +117,19 @@ export const AdminAthletesManagement: React.FC<AdminAthletesManagementProps> = (
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
     setIsDeleting(true);
-    const res = await deleteAthleteRegistration(deleteTarget.id, 'Admin Principal');
-    setIsDeleting(false);
-    if (res.success) {
-      showToast(`Cadastro de "${deleteTarget.profile?.nickname}" excluído com sucesso.`, 'info');
-      setDeleteTarget(null);
-      onRefreshData();
-    } else {
-      showToast(res.error || 'Erro ao excluir cadastro.', 'error');
+    try {
+      const res = await deleteAthleteRegistration(deleteTarget.id, 'Admin Principal');
+      if (res.success) {
+        showToast(`Cadastro de "${deleteTarget.profile?.nickname || 'Atleta'}" excluído com sucesso.`, 'info');
+        setDeleteTarget(null);
+        onRefreshData();
+      } else {
+        showToast(res.error || 'Erro ao excluir cadastro.', 'error');
+      }
+    } catch {
+      showToast('Erro inesperado ao excluir cadastro.', 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 

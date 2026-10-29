@@ -25,14 +25,14 @@ export const PendingStatusView: React.FC<PendingStatusViewProps> = ({
 
   const [isChecking, setIsChecking] = useState(false);
 
-  // Verificação periódica automática a cada 6 segundos enquanto aguarda aprovação
+  // Verificação periódica automática controlada enquanto aguarda aprovação
   useEffect(() => {
-    if (!onRefresh) return;
+    if (!onRefresh || isRejected || isSuspended) return;
     const interval = setInterval(() => {
       onRefresh();
-    }, 6000);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [onRefresh]);
+  }, [isRejected, isSuspended]);
 
   const handleManualRefresh = async () => {
     if (!onRefresh) return;
