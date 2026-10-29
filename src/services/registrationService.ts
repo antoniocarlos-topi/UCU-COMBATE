@@ -41,12 +41,52 @@ export interface RegistrationSubmissionResult {
 }
 
 /**
- * Converte um arquivo File para Data URL de forma assíncrona
+ * Converte um arquivo File para Data URL com compressão automática (evita sobrecarga no banco de dados)
  */
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = (e) => {
+      const rawData = (e.target?.result as string) || '';
+      if (!file.type.startsWith('image/')) {
+        resolve(rawData);
+        return;
+      }
+
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 400; // 400px é a dimensão ideal para fotos de perfil
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
+            return;
+          }
+        } catch {
+          // Fallback seguro para raw data
+        }
+        resolve(rawData);
+      };
+      img.onerror = () => resolve(rawData);
+      img.src = rawData;
+    };
     reader.onerror = () => resolve('');
     reader.readAsDataURL(file);
   });

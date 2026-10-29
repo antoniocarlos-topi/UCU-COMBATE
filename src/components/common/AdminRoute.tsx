@@ -8,8 +8,16 @@ import { Button } from './Button';
 export const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isAdmin, isLoading } = useAuth();
   const location = useLocation();
+  const [timedOut, setTimedOut] = React.useState(false);
 
-  if (isLoading) {
+  React.useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => setTimedOut(true), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
+
+  if (isLoading && !timedOut) {
     return <Loader fullPage text="Validando privilégios administrativos..." />;
   }
 

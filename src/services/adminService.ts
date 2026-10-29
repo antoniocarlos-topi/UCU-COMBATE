@@ -425,15 +425,20 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   // 1. Sincronizar com inscrições e dados mais recentes salvos no storage local
   syncAdminStoreFromUnified();
 
-  // 2. Sincronizar com o banco de dados global Supabase em tempo real
+  // 2. Sincronizar com o banco de dados global Supabase em tempo real com timeout de segurança
   try {
-    // Busca paralela e resiliente para não depender de restrições de chave estrangeira no cache do PostgREST
-    const [regRes, profRes, catRes, matchRes] = await Promise.all([
+    const cloudFetch = Promise.all([
       supabase.from('event_registrations').select('*'),
       supabase.from('profiles').select('*'),
       supabase.from('weight_categories').select('*'),
       supabase.from('matches').select('*'),
     ]);
+
+    const timeoutFallback = new Promise<any>((resolve) =>
+      setTimeout(() => resolve([{ data: null }, { data: null }, { data: null }, { data: null }]), 3500)
+    );
+
+    const [regRes, profRes, catRes, matchRes] = await Promise.race([cloudFetch, timeoutFallback]);
 
     if (!regRes.error && regRes.data && regRes.data.length > 0) {
       const profMap = new Map();
@@ -447,7 +452,7 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
 
       const mappedCloudRegs: EventRegistration[] = regRes.data.map((cr: any) => {
         const p = profMap.get(cr.profile_id);
-        const c = catMap.get(cr.weight_category_id);
+        const c: any = catMap.get(cr.weight_category_id);
         return {
           id: cr.id,
           event_id: cr.event_id,
