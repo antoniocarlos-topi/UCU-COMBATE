@@ -294,9 +294,9 @@ export async function getAthleteDashboardData(
             invitation_text: currentReg.events?.description || DEFAULT_INAUGURAL_EVENT.invitation_text,
             signatories: DEFAULT_INAUGURAL_EVENT.signatories,
             location_name: currentReg.events?.location_name || DEFAULT_INAUGURAL_EVENT.location_name,
-            event_date_text: currentReg.events?.event_date
-              ? new Date(currentReg.events.event_date).toLocaleDateString('pt-BR')
-              : DEFAULT_INAUGURAL_EVENT.event_date_text,
+            event_date_text: currentReg.events?.slug === 'arena-inaugural' || !currentReg.events?.event_date
+              ? 'Dia e horas a combinar'
+              : new Date(currentReg.events.event_date).toLocaleDateString('pt-BR'),
             whatsapp_group_url: currentReg.events?.whatsapp_group_url || DEFAULT_INAUGURAL_EVENT.whatsapp_group_url,
             requires_invite: Boolean(currentReg.events?.requires_invite),
             access_code: currentReg.events?.access_code,

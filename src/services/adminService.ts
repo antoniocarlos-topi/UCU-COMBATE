@@ -749,6 +749,52 @@ export async function suspendAthleteRegistration(
   return { success: true };
 }
 
+export async function deleteAthleteRegistration(
+  registrationId: string,
+  adminNickname: string = 'Admin Principal'
+): Promise<{ success: boolean; error?: string }> {
+  // 1. Tenta RPC
+  try {
+    await supabase.rpc('admin_delete_registration', { p_reg_id: registrationId });
+  } catch (rpcEx) {
+    console.warn('[AdminService] RPC admin_delete_registration:', rpcEx);
+  }
+
+  // 2. Deletes diretos como fallback
+  try {
+    await supabase
+      .from('matches')
+      .delete()
+      .or(`fighter1_registration_id.eq.${registrationId},fighter2_registration_id.eq.${registrationId}`);
+
+    const reg = adminStore.registrations.find((r) => r.id === registrationId);
+    const profileId = reg?.profile_id || registrationId;
+
+    await supabase.from('event_registrations').delete().eq('id', registrationId);
+    await supabase.from('profiles').delete().eq('id', profileId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao excluir no Supabase:', err);
+  }
+
+  // 3. Remove do store local
+  adminStore.registrations = adminStore.registrations.filter((r) => r.id !== registrationId);
+  adminStore.matches = adminStore.matches.filter(
+    (m) => m.fighter1_registration_id !== registrationId && m.fighter2_registration_id !== registrationId
+  );
+
+  logAuditAction(
+    null,
+    'ATHLETE_DELETED',
+    'event_registrations',
+    registrationId,
+    `Cadastro excluído pelo admin ${adminNickname}.`,
+    adminNickname
+  );
+
+  syncAdminStoreToUnified();
+  return { success: true };
+}
+
 export async function recordOfficialWeighIn(
   registrationId: string,
   officialWeight: number,

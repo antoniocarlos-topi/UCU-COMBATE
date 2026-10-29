@@ -136,7 +136,7 @@ export const ArenaPublicHome: React.FC = () => {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Calendar size={15} color="var(--color-gold-primary)" />
-            <span>Data e Horário: <strong style={{ color: '#fff' }}>A combinar</strong></span>
+            <span>Data e Horário: <strong style={{ color: '#fff' }}>Dia e horas a combinar</strong></span>
           </div>
         </div>
 
