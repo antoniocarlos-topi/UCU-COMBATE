@@ -188,7 +188,7 @@ export async function submitAthleteRegistration(
     );
 
     if (isSupabaseConfigured) {
-      // Tentar cadastro no auth
+      // Tentar cadastro no Supabase Auth
       let finalAuthId: string | null = null;
       try {
         const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -203,55 +203,61 @@ export async function submitAthleteRegistration(
         });
         if (!authError && authData?.user?.id) {
           finalAuthId = authData.user.id;
+        } else if (authError) {
+          console.warn('[RegistrationService] Aviso no signUp do Supabase:', authError.message);
         }
-      } catch {
-        // Prossegue mesmo se auth falhar por rate limit ou confirmação pendente
+      } catch (authEx) {
+        console.warn('[RegistrationService] Exceção no signUp do Supabase:', authEx);
       }
 
-      // Gravar no perfil da nuvem
-      // IMPORTANTE: Não incluir 'nickname_normalized' pois é uma coluna GENERATED ALWAYS
-      // no PostgreSQL e não pode ser inserida/atualizada diretamente.
-      if (finalAuthId) {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: profileId,
-          auth_user_id: finalAuthId,
-          full_name: data.fullName,
-          nickname: data.nickname,
-          recovery_email: data.recoveryEmail,
-          phone: data.phone,
-          birth_date: data.birthDate,
-          is_minor: isMinor,
-          guardian_name: isMinor ? data.guardianName : null,
-          guardian_relationship: isMinor ? data.guardianRelationship : null,
-          guardian_phone: isMinor ? data.guardianPhone : null,
-          guardian_document: isMinor ? data.guardianDoc : null,
-          image_consent: data.imageConsent,
-          terms_consent: data.termsConsent,
-          avatar_url: avatarDataUrl,
-        }, { onConflict: 'id' });
+      // Normalizar apelido para compatibilidade com a coluna NOT NULL do banco
+      const normalizedNick = normalizeNickname(data.nickname) || data.nickname.trim().toLowerCase();
 
-        if (profileError) {
-          console.warn('[RegistrationService] Erro ao sincronizar perfil no Supabase:', profileError.message);
-        } else {
-          console.info('[RegistrationService] Perfil sincronizado com Supabase com sucesso.');
-        }
+      // Gravar SEMPRE no perfil da nuvem para garantir sincronização global
+      const profilePayload = {
+        id: profileId,
+        auth_user_id: finalAuthId || profileId,
+        full_name: data.fullName,
+        nickname: data.nickname,
+        nickname_normalized: normalizedNick,
+        recovery_email: data.recoveryEmail,
+        phone: data.phone,
+        birth_date: data.birthDate,
+        is_minor: isMinor,
+        guardian_name: isMinor ? data.guardianName : null,
+        guardian_relationship: isMinor ? data.guardianRelationship : null,
+        guardian_phone: isMinor ? data.guardianPhone : null,
+        guardian_document: isMinor ? data.guardianDoc : null,
+        image_consent: data.imageConsent,
+        terms_consent: data.termsConsent,
+        avatar_url: avatarDataUrl,
+      };
 
-        // Gravar a inscrição no evento na nuvem
-        const { error: regError } = await supabase.from('event_registrations').upsert({
-          id: regId,
-          event_id: data.event.id,
-          profile_id: profileId,
-          weight_category_id: category.id || 'cat-meio-medio',
-          declared_weight: weightVal.parsedWeight,
-          status: 'pending',
-          guardian_authorized: isMinor,
-        }, { onConflict: 'id' });
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert(profilePayload, { onConflict: 'id' });
 
-        if (regError) {
-          console.warn('[RegistrationService] Erro ao sincronizar inscrição no Supabase:', regError.message);
-        } else {
-          console.info('[RegistrationService] Inscrição sincronizada com Supabase com sucesso.');
-        }
+      if (profileError) {
+        console.warn('[RegistrationService] Erro ao sincronizar perfil no Supabase:', profileError.message);
+      } else {
+        console.info('[RegistrationService] Perfil sincronizado com Supabase com sucesso:', profileId);
+      }
+
+      // Gravar a inscrição no evento na nuvem
+      const { error: regError } = await supabase.from('event_registrations').upsert({
+        id: regId,
+        event_id: data.event.id,
+        profile_id: profileId,
+        weight_category_id: category.id || 'cat-meio-medio',
+        declared_weight: weightVal.parsedWeight,
+        status: 'pending',
+        guardian_authorized: isMinor,
+      }, { onConflict: 'id' });
+
+      if (regError) {
+        console.warn('[RegistrationService] Erro ao sincronizar inscrição no Supabase:', regError.message);
+      } else {
+        console.info('[RegistrationService] Inscrição sincronizada com Supabase com sucesso:', regId);
       }
     }
 

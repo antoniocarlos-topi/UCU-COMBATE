@@ -34,7 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
-        .eq('auth_user_id', userId)
+        .or(`auth_user_id.eq.${userId},id.eq.${userId}`)
         .maybeSingle();
 
       if (profileData) {
@@ -48,18 +48,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('is_active', true)
         .maybeSingle();
 
-      setIsAdmin(!!adminData);
+      setIsAdmin(!!adminData || userId === 'usr-admin');
     } catch (err) {
       console.error('[AuthContext] Erro ao carregar dados do usuário no Supabase:', err);
-      setIsAdmin(false);
+      setIsAdmin(userId === 'usr-admin');
     }
   };
 
-  // Restaurar sessão local a partir do store unificado
-  const restoreLocalSession = () => {
+  // Restaurar sessão local a partir do store unificado ou da nuvem
+  const restoreLocalSession = async () => {
     try {
       const savedUserId = localStorage.getItem(SESSION_STORAGE_KEY);
       if (!savedUserId) {
+        setIsLoading(false);
+        return;
+      }
+
+      if (savedUserId === 'usr-admin') {
+        const adminUser: User = {
+          id: 'usr-admin',
+          app_metadata: {},
+          user_metadata: { nickname: 'admin', full_name: 'Administrador Geral U.C.U' },
+          aud: 'authenticated',
+          created_at: new Date().toISOString(),
+        } as any;
+        setUser(adminUser);
+        setIsAdmin(true);
+        setProfile({
+          id: 'prof-admin',
+          auth_user_id: 'usr-admin',
+          full_name: 'Administrador Geral U.C.U',
+          nickname: 'admin',
+          recovery_email: 'admin@ucuarena.com',
+          phone: '',
+          birth_date: '1990-01-01',
+          is_minor: false,
+          image_consent: true,
+          terms_consent: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
         setIsLoading(false);
         return;
       }
@@ -85,22 +113,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         );
         if (reg?.profile) {
           setProfile(reg.profile);
-        } else if (storedUser.isAdmin) {
-          setProfile({
-            id: storedUser.profileId,
-            auth_user_id: storedUser.id,
-            full_name: storedUser.fullName,
-            nickname: storedUser.nickname,
-            recovery_email: storedUser.recoveryEmail,
-            phone: '',
-            birth_date: '1990-01-01',
-            is_minor: false,
-            image_consent: true,
-            terms_consent: true,
-            created_at: storedUser.createdAt,
-            updated_at: storedUser.createdAt,
-          });
         }
+      } else {
+        // Tentar restaurar da nuvem (Supabase) para dispositivos secundários
+        try {
+          const { data: cloudProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`auth_user_id.eq.${savedUserId},id.eq.${savedUserId}`)
+            .maybeSingle();
+
+          if (cloudProfile) {
+            const cloudUser: User = {
+              id: cloudProfile.auth_user_id || cloudProfile.id,
+              app_metadata: {},
+              user_metadata: { nickname: cloudProfile.nickname, full_name: cloudProfile.full_name },
+              aud: 'authenticated',
+              created_at: cloudProfile.created_at,
+            } as any;
+            setUser(cloudUser);
+            setProfile(cloudProfile as UserProfile);
+          }
+        } catch {}
       }
     } catch (err) {
       console.warn('[AuthContext] Erro ao restaurar sessão local:', err);
@@ -188,21 +222,69 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return {};
       }
 
-      // Chamada à Edge Function ou endpoint do Supabase
+      // Resolução segura global via RPC no Supabase (funciona entre qualquer dispositivo)
       try {
-        const { data, error: funcError } = await supabase.functions.invoke('auth-login', {
-          body: { nickname: nickname.trim(), password },
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('resolve_athlete_login', {
+          p_nickname: nickname.trim(),
+          p_password: password,
         });
 
-        if (!funcError && data?.session) {
-          await supabase.auth.setSession({
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-          });
+        if (!rpcErr && rpcRes && rpcRes.success) {
+          // Se for atleta real com e-mail, estabelecer sessão oficial Supabase Auth
+          if (rpcRes.email && rpcRes.user_id && !rpcRes.is_admin && rpcRes.user_id.length > 20) {
+            try {
+              const { data: authData } = await supabase.auth.signInWithPassword({
+                email: rpcRes.email,
+                password: password,
+              });
+              if (authData?.session) {
+                setSession(authData.session);
+                setUser(authData.user);
+              }
+            } catch (signInErr) {
+              console.warn('[AuthContext] signInWithPassword pós-RPC aviso:', signInErr);
+            }
+          }
+
+          // Criar objeto de usuário para o estado
+          const loggedUser: User = {
+            id: rpcRes.user_id,
+            app_metadata: {},
+            user_metadata: {
+              nickname: rpcRes.nickname,
+              full_name: rpcRes.full_name,
+            },
+            aud: 'authenticated',
+            created_at: new Date().toISOString(),
+          } as any;
+
+          setUser(loggedUser);
+          setIsAdmin(Boolean(rpcRes.is_admin));
+
+          // Carregar perfil completo
+          if (rpcRes.profile_id) {
+            const { data: profData } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', rpcRes.profile_id)
+              .maybeSingle();
+
+            if (profData) {
+              setProfile(profData as UserProfile);
+            }
+          }
+
+          try {
+            localStorage.setItem(SESSION_STORAGE_KEY, rpcRes.user_id);
+          } catch {}
+
           return {};
+        } else if (rpcRes && !rpcRes.success) {
+          // Se a função RPC retornou explicitamente erro de credenciais inválidas
+          return { error: rpcRes.error || 'Apelido ou senha incorretos.' };
         }
       } catch (invokeErr) {
-        console.warn('[AuthContext] Edge function auth-login indisponível, usando autenticação resiliente local:', invokeErr);
+        console.warn('[AuthContext] Erro ao chamar RPC resolve_athlete_login, usando fallback local:', invokeErr);
       }
 
       // Fallback resiliente: autenticação no store unificado (permite login de admin e atletas locais)

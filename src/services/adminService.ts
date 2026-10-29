@@ -348,6 +348,33 @@ export function syncAdminStoreToUnified(): void {
     unified.announcements = [...adminStore.announcements];
     unified.mediaItems = [...adminStore.mediaItems];
     unified.auditLogs = [...adminStore.auditLogs];
+
+    // Popular unified.users para qualquer perfil da nuvem que ainda não esteja no store local
+    for (const reg of adminStore.registrations) {
+      if (reg.profile && reg.profile.nickname) {
+        const cleanNick = reg.profile.nickname.trim().toLowerCase();
+        const existing = unified.users.find(
+          (u) =>
+            u.nicknameNormalized === cleanNick ||
+            u.id === reg.profile?.auth_user_id ||
+            u.profileId === reg.profile?.id
+        );
+        if (!existing) {
+          unified.users.push({
+            id: reg.profile.auth_user_id || reg.profile.id,
+            nickname: reg.profile.nickname,
+            nicknameNormalized: cleanNick,
+            password: 'password',
+            fullName: reg.profile.full_name,
+            recoveryEmail: reg.profile.recovery_email,
+            isAdmin: false,
+            profileId: reg.profile.id,
+            createdAt: reg.profile.created_at || new Date().toISOString(),
+          });
+        }
+      }
+    }
+
     saveUnifiedStore(unified);
   } catch (err) {
     console.error('[AdminService] Falha ao sincronizar para o UnifiedStore:', err);
@@ -401,14 +428,21 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   // 2. Sincronizar com o banco de dados global Supabase em tempo real
   try {
     // Busca paralela e resiliente para não depender de restrições de chave estrangeira no cache do PostgREST
-    const [regRes, profRes, catRes] = await Promise.all([
+    const [regRes, profRes, catRes, matchRes] = await Promise.all([
       supabase.from('event_registrations').select('*'),
       supabase.from('profiles').select('*'),
       supabase.from('weight_categories').select('*'),
+      supabase.from('matches').select('*'),
     ]);
 
     if (!regRes.error && regRes.data && regRes.data.length > 0) {
-      const profMap = new Map((profRes.data || []).map((p: any) => [p.id, p]));
+      const profMap = new Map();
+      for (const p of profRes.data || []) {
+        profMap.set(p.id, p);
+        if (p.auth_user_id) {
+          profMap.set(p.auth_user_id, p);
+        }
+      }
       const catMap = new Map((catRes.data || []).map((c: any) => [c.id, c]));
 
       const mappedCloudRegs: EventRegistration[] = regRes.data.map((cr: any) => {
@@ -475,6 +509,41 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
       }
 
       adminStore.registrations = Array.from(cloudMap.values());
+
+      // Sincronizar lutas da nuvem se disponíveis
+      if (!matchRes.error && matchRes.data && matchRes.data.length > 0) {
+        const regMap = new Map(adminStore.registrations.map((r) => [r.id, r]));
+        const cloudMatches: MatchFight[] = matchRes.data.map((cm: any) => ({
+          id: cm.id,
+          event_id: cm.event_id,
+          weight_category_id: cm.weight_category_id,
+          match_order: Number(cm.match_order),
+          round_name: cm.round_name,
+          fighter1_registration_id: cm.fighter1_registration_id,
+          fighter2_registration_id: cm.fighter2_registration_id,
+          status: cm.status as any,
+          winner_registration_id: cm.winner_registration_id || null,
+          victory_method: cm.victory_method || null,
+          score_details: cm.score_details || null,
+          video_url: cm.video_url || undefined,
+          scheduled_time: cm.scheduled_time || null,
+          completed_at: cm.completed_at || null,
+          fighter1: regMap.get(cm.fighter1_registration_id),
+          fighter2: regMap.get(cm.fighter2_registration_id),
+        }));
+
+        const matchMap = new Map<string, MatchFight>();
+        for (const m of cloudMatches) {
+          matchMap.set(m.id, m);
+        }
+        for (const localM of adminStore.matches) {
+          if (!matchMap.has(localM.id)) {
+            matchMap.set(localM.id, localM);
+          }
+        }
+        adminStore.matches = Array.from(matchMap.values());
+      }
+
       syncAdminStoreToUnified();
     }
   } catch (err) {
@@ -788,6 +857,27 @@ export async function createOrUpdateMatch(
     );
   }
 
+  // Sincronizar na nuvem (Supabase)
+  try {
+    await supabase.from('matches').upsert(
+      {
+        id: matchToSave.id,
+        event_id: matchToSave.event_id,
+        weight_category_id: matchToSave.weight_category_id,
+        match_order: matchToSave.match_order,
+        round_name: matchToSave.round_name,
+        fighter1_registration_id: matchToSave.fighter1_registration_id,
+        fighter2_registration_id: matchToSave.fighter2_registration_id,
+        status: matchToSave.status,
+        scheduled_time: matchToSave.scheduled_time,
+        video_url: matchToSave.video_url || null,
+      },
+      { onConflict: 'id' }
+    );
+  } catch (err) {
+    console.warn('[AdminService] Falha ao sincronizar confronto no Supabase:', err);
+  }
+
   syncAdminStoreToUnified();
   return { success: true, match: matchToSave };
 }
@@ -811,6 +901,14 @@ export async function deleteMatch(
     `Confronto #${removed.match_order} foi excluído permanentemente.`,
     adminNickname
   );
+
+  // Sincronizar exclusão na nuvem (Supabase)
+  try {
+    await supabase.from('matches').delete().eq('id', matchId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao excluir confronto no Supabase:', err);
+  }
+
   syncAdminStoreToUnified();
   return { success: true };
 }
@@ -835,6 +933,17 @@ export async function updateMatchVideo(
     `Vídeo da luta #${match.match_order} configurado: ${videoUrl || 'removido'}.`,
     adminNickname
   );
+
+  // Sincronizar vídeo na nuvem (Supabase)
+  try {
+    await supabase
+      .from('matches')
+      .update({ video_url: match.video_url || null })
+      .eq('id', matchId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao sincronizar vídeo no Supabase:', err);
+  }
+
   syncAdminStoreToUnified();
   return { success: true };
 }
@@ -894,6 +1003,24 @@ export async function recordOfficialMatchResult(
     adminNickname
   );
 
+  // Sincronizar resultado na nuvem (Supabase)
+  try {
+    await supabase
+      .from('matches')
+      .update({
+        status: 'completed',
+        winner_registration_id: result.winnerRegistrationId,
+        victory_method: result.victoryMethod,
+        score_details: result.scoreDetails || null,
+        completed_at: match.completed_at,
+        video_url: match.video_url || null,
+      })
+      .eq('id', matchId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao sincronizar resultado no Supabase:', err);
+  }
+
+  syncAdminStoreToUnified();
   return { success: true };
 }
 

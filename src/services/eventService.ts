@@ -31,11 +31,17 @@ export const DEFAULT_INAUGURAL_EVENT: EventInvitationData = {
   slug: 'arena-inaugural',
   title: 'Campeonato Amador de Boxe U.C.U',
   headline: 'Comunicado Oficial U.C.U',
-  invitation_text: `É com prazer que gostaríamos de anunciar a primeira edição do campeonato amador de boxe U.C.U. Selecionamos apenas os melhores entre os melhores, entre pessoas conhecidas, e é com honra que comunicamos que você foi escolhido para ser uma das estrelas do nosso evento como lutador oficial da U.C.U.
+  invitation_text: `É com prazer que gostaríamos de anunciar a primeira edição do campeonato amador de box U.C.U, e selecionamos apenas os melhores entre os melhores e apenas entre conhecidos, e é com honra que eu gostaria de te comunicar que você foi escolhido para ser uma das estrelas do nosso evento, como lutador oficial do UCU.
 
-Iremos utilizar os equipamentos necessários para reduzir os riscos e contar com arbitragem adequada ao evento. Teremos luvas disponíveis e tatame.
+Iremos usar os equipamentos necessários para que não aconteça nenhuma tragédia e arbitragem profissional!
 
-Se realmente deseja participar, clique no botão ‘Quero lutar’. Caso não queira participar, clique em ‘Não quero participar’.`,
+Contaremos com luvas disponíveis e tatame.
+
+Se você realmente deseja participar clique no botão aqui em baixo "quero lutar" para participar, caso não queira participar, clique no botão "não quero participar".
+
+Local será no espaço M-thor, dia e horas ainda á combinar.
+
+Dito isso agradeço a sua atenção, e conto com sua presença.`,
   signatories: [
     'Antônio Carlos',
     'Jardel Franklin',
