@@ -6,6 +6,7 @@
 export interface ImageProcessingResult {
   file: File;
   previewUrl: string;
+  dataUrl: string; // Base64 data URL para persistência em banco de dados
   originalSizeKb: number;
   compressedSizeKb: number;
   width: number;
@@ -113,14 +114,33 @@ export async function processAndCompressAthleteAvatar(
             const compressedFile = new File([blob], fileName, { type: 'image/webp' });
             const previewUrl = URL.createObjectURL(blob);
 
-            resolve({
-              file: compressedFile,
-              previewUrl,
-              originalSizeKb: Math.round(file.size / 1024),
-              compressedSizeKb: Math.round(blob.size / 1024),
-              width,
-              height,
-            });
+            // Gerar data URL base64 para persistência no banco de dados
+            const dataUrlReader = new FileReader();
+            dataUrlReader.onloadend = () => {
+              resolve({
+                file: compressedFile,
+                previewUrl,
+                dataUrl: (dataUrlReader.result as string) || '',
+                originalSizeKb: Math.round(file.size / 1024),
+                compressedSizeKb: Math.round(blob.size / 1024),
+                width,
+                height,
+              });
+            };
+            dataUrlReader.onerror = () => {
+              // Fallback: usar canvas.toDataURL se FileReader falhar
+              const fallbackDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+              resolve({
+                file: compressedFile,
+                previewUrl,
+                dataUrl: fallbackDataUrl,
+                originalSizeKb: Math.round(file.size / 1024),
+                compressedSizeKb: Math.round(blob.size / 1024),
+                width,
+                height,
+              });
+            };
+            dataUrlReader.readAsDataURL(blob);
           },
           'image/webp',
           0.85
