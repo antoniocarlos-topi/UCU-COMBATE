@@ -6,8 +6,16 @@ import { Loader } from './Loader';
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
   const location = useLocation();
+  const [timedOut, setTimedOut] = React.useState(false);
 
-  if (isLoading) {
+  React.useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => setTimedOut(true), 2500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
+
+  if (isLoading && !timedOut) {
     return <Loader fullPage text="Verificando credenciais..." />;
   }
 

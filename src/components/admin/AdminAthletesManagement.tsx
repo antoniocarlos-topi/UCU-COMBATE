@@ -6,6 +6,7 @@ import { Badge } from '../common/Badge';
 import { Button } from '../common/Button';
 import { InputField } from '../common/InputField';
 import { Modal } from '../common/Modal';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useToast } from '../../contexts/ToastContext';
 import {
   approveAthleteRegistration,
@@ -13,6 +14,7 @@ import {
   suspendAthleteRegistration,
   recordOfficialWeighIn,
   exportEventParticipantsCsv,
+  deleteAthleteRegistration,
 } from '../../services/adminService';
 import {
   Search,
@@ -24,6 +26,7 @@ import {
   AlertCircle,
   Ban,
   User,
+  Trash2,
 } from 'lucide-react';
 
 export interface AdminAthletesManagementProps {
@@ -52,6 +55,10 @@ export const AdminAthletesManagement: React.FC<AdminAthletesManagementProps> = (
   const [isRejecting, setIsRejecting] = useState(false);
 
   const [inspectTarget, setInspectTarget] = useState<EventRegistration | null>(null);
+
+  // Exclusão
+  const [deleteTarget, setDeleteTarget] = useState<EventRegistration | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Filtro
   const filteredAthletes = registrations.filter((reg) => {
@@ -104,6 +111,20 @@ export const AdminAthletesManagement: React.FC<AdminAthletesManagementProps> = (
       onRefreshData();
     } else {
       showToast(res.error || 'Erro ao suspender atleta.', 'error');
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    const res = await deleteAthleteRegistration(deleteTarget.id, 'Admin Principal');
+    setIsDeleting(false);
+    if (res.success) {
+      showToast(`Cadastro de "${deleteTarget.profile?.nickname}" excluído com sucesso.`, 'info');
+      setDeleteTarget(null);
+      onRefreshData();
+    } else {
+      showToast(res.error || 'Erro ao excluir cadastro.', 'error');
     }
   };
 
@@ -397,6 +418,15 @@ export const AdminAthletesManagement: React.FC<AdminAthletesManagementProps> = (
                       Suspender
                     </Button>
                   )}
+
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    leftIcon={<Trash2 size={14} />}
+                    onClick={() => setDeleteTarget(reg)}
+                  >
+                    Excluir
+                  </Button>
                 </div>
               </Card>
             );
@@ -526,6 +556,18 @@ export const AdminAthletesManagement: React.FC<AdminAthletesManagementProps> = (
           </div>
         </Modal>
       )}
+
+      <ConfirmDialog
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        title="Excluir Cadastro"
+        message={`Tem certeza que deseja excluir o cadastro de "${deleteTarget?.profile?.nickname || 'Atleta'}"? Esta ação não pode ser desfeita.`}
+        confirmText="Excluir"
+        cancelText="Cancelar"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 };

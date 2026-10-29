@@ -437,11 +437,13 @@ export function getUnifiedStore(): UnifiedArenaStore {
 }
 
 // Salvar store unificado no localStorage e disparar evento global
-export function saveUnifiedStore(store: UnifiedArenaStore): void {
+export function saveUnifiedStore(store: UnifiedArenaStore, options?: { silent?: boolean }): void {
   try {
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-      window.dispatchEvent(new CustomEvent(STORE_CHANGE_EVENT, { detail: store }));
+      if (!options?.silent) {
+        window.dispatchEvent(new CustomEvent(STORE_CHANGE_EVENT, { detail: store }));
+      }
     }
   } catch (err) {
     console.error('[storeSync] Erro ao salvar store no localStorage:', err);

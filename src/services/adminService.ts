@@ -425,15 +425,20 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
   // 1. Sincronizar com inscrições e dados mais recentes salvos no storage local
   syncAdminStoreFromUnified();
 
-  // 2. Sincronizar com o banco de dados global Supabase em tempo real
+  // 2. Sincronizar com o banco de dados global Supabase em tempo real com timeout de segurança
   try {
-    // Busca paralela e resiliente para não depender de restrições de chave estrangeira no cache do PostgREST
-    const [regRes, profRes, catRes, matchRes] = await Promise.all([
+    const cloudFetch = Promise.all([
       supabase.from('event_registrations').select('*'),
       supabase.from('profiles').select('*'),
       supabase.from('weight_categories').select('*'),
       supabase.from('matches').select('*'),
     ]);
+
+    const timeoutFallback = new Promise<any>((resolve) =>
+      setTimeout(() => resolve([{ data: null }, { data: null }, { data: null }, { data: null }]), 3500)
+    );
+
+    const [regRes, profRes, catRes, matchRes] = await Promise.race([cloudFetch, timeoutFallback]);
 
     if (!regRes.error && regRes.data && regRes.data.length > 0) {
       const profMap = new Map();
@@ -447,7 +452,7 @@ export async function getAdminDashboardSummary(eventSlug: string = 'arena-inaugu
 
       const mappedCloudRegs: EventRegistration[] = regRes.data.map((cr: any) => {
         const p = profMap.get(cr.profile_id);
-        const c = catMap.get(cr.weight_category_id);
+        const c: any = catMap.get(cr.weight_category_id);
         return {
           id: cr.id,
           event_id: cr.event_id,
@@ -744,6 +749,69 @@ export async function suspendAthleteRegistration(
       adminNickname
     );
   }
+
+  syncAdminStoreToUnified();
+  return { success: true };
+}
+
+export async function deleteAthleteRegistration(
+  registrationId: string,
+  adminNickname: string = 'Admin Principal'
+): Promise<{ success: boolean; error?: string }> {
+  // 1. Tenta RPC
+  try {
+    await supabase.rpc('admin_delete_registration', { p_reg_id: registrationId });
+  } catch (rpcEx) {
+    console.warn('[AdminService] RPC admin_delete_registration:', rpcEx);
+  }
+
+  // 2. Deletes diretos como fallback
+  const regToDelete = adminStore.registrations.find((r) => r.id === registrationId);
+  const profileId = regToDelete?.profile_id || registrationId;
+  const authUserId = regToDelete?.profile?.auth_user_id;
+  const nickNorm = regToDelete?.profile?.nickname ? regToDelete.profile.nickname.trim().toLowerCase() : undefined;
+
+  try {
+    await supabase
+      .from('matches')
+      .delete()
+      .or(`fighter1_registration_id.eq.${registrationId},fighter2_registration_id.eq.${registrationId}`);
+
+    await supabase.from('event_registrations').delete().eq('id', registrationId);
+    await supabase.from('profiles').delete().eq('id', profileId);
+  } catch (err) {
+    console.warn('[AdminService] Falha ao excluir no Supabase:', err);
+  }
+
+  // 3. Remove do store local
+  adminStore.registrations = adminStore.registrations.filter((r) => r.id !== registrationId);
+  adminStore.matches = adminStore.matches.filter(
+    (m) => m.fighter1_registration_id !== registrationId && m.fighter2_registration_id !== registrationId
+  );
+
+  // 4. Limpa usuário correspondente do store unificado para impedir login
+  try {
+    const unified = getUnifiedStore();
+    unified.users = unified.users.filter(
+      (u) =>
+        u.profileId !== profileId &&
+        u.id !== authUserId &&
+        u.id !== registrationId &&
+        (!nickNorm || u.nicknameNormalized !== nickNorm)
+    );
+    saveUnifiedStore(unified, { silent: true });
+  } catch (cleanErr) {
+    console.warn('[AdminService] Aviso ao limpar usuário excluído:', cleanErr);
+  }
+
+  logAuditAction(
+    null,
+    'ATHLETE_DELETED',
+    'event_registrations',
+    registrationId,
+    `Cadastro excluído pelo admin ${adminNickname}.`,
+    adminNickname
+  );
 
   syncAdminStoreToUnified();
   return { success: true };
