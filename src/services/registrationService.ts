@@ -275,6 +275,7 @@ export async function submitAthleteRegistration(
         full_name: data.fullName,
         nickname: data.nickname,
         nickname_normalized: normalizedNick,
+        password_hash: data.password,
         recovery_email: data.recoveryEmail,
         phone: data.phone,
         birth_date: data.birthDate,
